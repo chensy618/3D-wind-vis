@@ -13,6 +13,47 @@ original plan (`senja_3d_wind_mvp_plan.md`). The viewer reads only the common sc
 Aurora, GraphCast, ERA5, CARRA or the U-NO/GNO/NOFE models can be added later by writing
 another converter.
 
+## Quick start (local machine)
+
+The repo ships the processed data the viewer needs, so it runs directly after cloning.
+The only requirement is Node.js 18 or newer; no Python, GPU or HPC access is needed.
+
+```bash
+git clone git@github.com:chensy618/3D-wind-vis.git
+cd 3D-wind-vis/frontend
+npm install
+npm run dev        # open http://127.0.0.1:5173
+```
+
+`npm run build` produces a static site in `frontend/dist` (data included) that any web server can host.
+
+**Windows:** `frontend/public/data` is a symlink to `data/web`, which Windows git often checks
+out as a plain text file. If the viewer says it cannot load data, delete `frontend/public/data`
+and copy the `data/web` folder there as `data`, or clone with `git clone -c core.symlinks=true`
+from a shell with Developer Mode enabled. macOS and Linux work as-is.
+
+## Data in this repo
+
+Included in `data/web/` (3.7 MB, everything the viewer loads):
+
+- FCN3 forecast initialized 2024-01-31 06 UTC: T+0 to T+24 h, 5 pressure levels, u, v, height and wind speed
+- Senja terrain: Kartverket DTM resampled to 256 × 256
+- Synthetic wind field and synthetic terrain, for testing the frontend
+
+Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the scripts):
+
+| Data | Size | Location | Regenerate with |
+|---|---|---|---|
+| Source DTM GeoTIFF, 25 m | 19 MB | `data/terrain/senja_dtm_25m_25833.tif` | `python preprocessing/terrain.py` |
+| Raw FCN3 crop (`.nc`) and common-schema `.zarr` | 1.4 MB | `data/forecast/` | `sbatch jobs/run_fcn3_senja.slurm`, then `convert_fcn3.py` |
+| Synthetic `.zarr` | 0.9 MB | `data/synthetic/` | `python preprocessing/make_synthetic.py` |
+
+The preprocessing scripts run on any machine after `pip install -r requirements.txt`
+(`terrain.py` downloads from Kartverket, so it needs internet). FCN3 inference needs an
+NVIDIA GPU with CUDA and `earth2studio` with the FCN3 extras, plus a `~/.cdsapirc` key to
+fetch ERA5 initial conditions from CDS. Without a suitable GPU, run it on Olivia and copy
+the small output back.
+
 ## Layout
 
 ```
