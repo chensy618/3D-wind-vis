@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Senja 3D Wind</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="view"></canvas>
+
+      <header class="panel" id="info">
+        <h1>Senja 3D Wind</h1>
+        <div class="meta">
+          <span id="model-name"></span>
+          <span id="init-time"></span>
+        </div>
+        <div class="desc" id="model-desc"></div>
+      </header>
+
+      <aside class="panel" id="controls">
+        <section>
+          <h2>Data</h2>
+          <label class="field">Forecast <select id="dataset" aria-label="Forecast dataset"></select></label>
+          <label class="field">Terrain <select id="terrain" aria-label="Terrain"></select></label>
+          <div class="desc small" id="terrain-src"></div>
+        </section>
+        <section>
+          <h2>Vertical level</h2>
+          <div id="levels"></div>
+        </section>
+        <section>
+          <h2>Display</h2>
+          <label class="range">Particles <output id="n-particles-out"></output>
+            <input id="n-particles" type="range" min="1000" max="12000" step="500" value="4000" />
+          </label>
+          <label class="range">Flow speed <output id="flow-speed-out"></output>
+            <input id="flow-speed" type="range" min="50" max="1000" step="25" value="300" />
+          </label>
+          <label class="range">Vertical exaggeration <output id="exaggeration-out"></output>
+            <input id="exaggeration" type="range" min="1" max="10" step="0.5" value="4" />
+          </label>
+          <label class="check"><input id="show-surface" type="checkbox" checked /> Level surface (speed)</label>
+          <label class="check"><input id="smooth" type="checkbox" checked /> Smooth time interpolation</label>
+          <button id="reset-camera" class="wide">Reset camera</button>
+        </section>
+        <div class="hint">Drag: rotate · Right-drag / Shift: pan · Wheel: zoom · Click: inspect</div>
+        <div class="fps" id="fps"></div>
+      </aside>
+
+      <aside class="panel" id="inspector" hidden></aside>
+      <div class="panel" id="legend"></div>
+      <footer class="panel" id="timeline"></footer>
+
+      <div id="loading" hidden><div class="spinner"></div><span>Loading…</span></div>
+      <div id="error" role="alert" hidden></div>
+      <div id="notice" hidden></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

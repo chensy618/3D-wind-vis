@@ -1,0 +1,11 @@
+# CPU preprocessing (preprocessing/*.py)
+numpy
+xarray
+zarr>=3
+netCDF4
+scipy
+rasterio
+pyproj
+requests
+# GPU inference (model/fcn3_inference.py) additionally needs:
+#   earth2studio[fcn3]  (makani, torch-harmonics, torch)  -- see envs/earth2studio on Olivia
