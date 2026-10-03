@@ -173,7 +173,10 @@ function buildArrows(): void {
   if (view.grid === 'native') {
     // one arrow per model grid point
     points = nativeCells.map((c) => ({ x: c.x, y: c.y, u: nearest(s.u, s, c.x, c.y), v: nearest(s.v, s, c.x, c.y) }));
-    spacing = 0.8 * Math.min(...nativeCells.map((c) => Math.min(c.x1 - c.x0, c.y1 - c.y0)));
+    // a full cell's size (edge cells are clipped by the domain)
+    const w = Math.max(...nativeCells.map((c) => c.x1 - c.x0));
+    const h = Math.max(...nativeCells.map((c) => c.y1 - c.y0));
+    spacing = 0.8 * Math.min(w, h);
   } else {
     const stride = Math.max(1, Math.round(1.6 / Math.min(model.dx, model.dy))); // ~1.6 km apart
     points = [];
@@ -221,8 +224,14 @@ function buildNativeCells(domain: Domain, model: SurfaceWindModel, deg: number):
   const half = deg / 2;
   const lats: number[] = [];
   const lons: number[] = [];
-  for (let lat = Math.ceil((domain.latMin - half) / deg) * deg; lat - half < domain.latMax; lat += deg) lats.push(lat);
-  for (let lon = Math.ceil((domain.lonMin - half) / deg) * deg; lon - half < domain.lonMax; lon += deg) lons.push(lon);
+  // cells that overlap the domain; a cell that only touches its edge has zero size and is left out
+  const eps = 1e-6 * deg;
+  for (let lat = Math.ceil((domain.latMin - half) / deg) * deg; lat - half < domain.latMax - eps; lat += deg) {
+    if (lat + half > domain.latMin + eps) lats.push(lat);
+  }
+  for (let lon = Math.ceil((domain.lonMin - half) / deg) * deg; lon - half < domain.lonMax - eps; lon += deg) {
+    if (lon + half > domain.lonMin + eps) lons.push(lon);
+  }
   const cells: NativeCell[] = [];
   for (const lat of lats) {
     for (const lon of lons) {
