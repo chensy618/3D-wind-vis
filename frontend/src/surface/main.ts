@@ -4,10 +4,12 @@ import '../style.css';
 import { colormapCss, colormapLinear, divergingCss, divergingLinear, niceMax } from '../colormap';
 import { Domain } from '../geo';
 import { CameraRig, createCamera } from '../scene/camera';
+import { Highlight } from '../scene/highlight';
 import { ParticleRenderer } from '../scene/particles';
 import { buildTerrainMesh, terrainColor } from '../scene/terrain';
 import { windFrom } from '../ui/inspector';
 import { renderScale, ScaleSpec } from '../ui/legend';
+import { PointQuery } from '../ui/query';
 import { timeWeights } from '../wind/interpolation';
 import { loadIndex, loadTerrain, loadWind, loadWindManifest, Terrain, WindField } from '../wind/loader';
 import { SurfaceParams, SurfaceWindModel } from './model';
@@ -104,7 +106,8 @@ const ps = new SurfaceParticles();
 const grid = new GridOverlay();
 const arrows = new ArrowField();
 const tenMarker = new TenMetreMarker();
-scene.add(particles.group, grid.group, arrows.group, tenMarker.group);
+const highlight = new Highlight();
+scene.add(particles.group, grid.group, arrows.group, tenMarker.group, highlight.group);
 
 // ---------------------------------------------------------------- helpers
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -185,10 +188,28 @@ function buildArrows(): void {
   arrows.build(points, spacing, terrain, domain, view.exaggeration, maxSpeed, view.overlay === 'speed');
 }
 
-function placeTenMarker(): void {
-  if (data && probe) tenMarker.set(data.terrain, data.domain, probe.x, probe.y, view.exaggeration);
-  else tenMarker.hide();
+/** Marks the probe point: the 10 m stick and the highlight ring. `restart` = a new point. */
+function placeTenMarker(restart = false): void {
+  if (!data || !probe) {
+    tenMarker.hide();
+    highlight.hide();
+    return;
+  }
+  const { terrain, domain } = data;
+  tenMarker.set(terrain, domain, probe.x, probe.y, view.exaggeration);
+  const ground = (terrain.at(domain.lat(probe.y), domain.lon(probe.x)) / 1000) * view.exaggeration;
+  highlight.set(domain.sceneX(probe.x), ground, domain.sceneZ(probe.y), restart);
 }
+
+const query = new PointQuery($('#query'), (lat, lon) => {
+  if (!data) return;
+  const { domain, terrain } = data;
+  probe = { x: domain.localX(lon), y: domain.localY(lat) };
+  updateProbe();
+  placeTenMarker(true);
+  const ground = (terrain.at(lat, lon) / 1000) * view.exaggeration;
+  rig?.focus(new THREE.Vector3(domain.sceneX(probe.x), ground, domain.sceneZ(probe.y)));
+});
 
 /** Mark the active button of a segmented control. */
 function setSeg(root: HTMLElement, attr: string, value: string): void {
@@ -514,6 +535,7 @@ function updateProbe(): void {
   el.hidden = false;
   el.innerHTML = `
     <div class="insp-head"><h2>Point · ${Math.round(Math.max(elev, 0))} m</h2><button data-act="close" aria-label="Close">×</button></div>
+    <div class="pos">${domain.lat(y).toFixed(3)}° N, ${domain.lon(x).toFixed(3)}° E</div>
     <div class="kind">${kind}</div>
     <dl class="kv">
       <dt>10 m wind</dt><dd>${f1(Math.hypot(u, v))} m/s from ${compass(dir)}</dd>
@@ -598,6 +620,7 @@ async function load(terrainId: string): Promise<void> {
     }
     probe = null;
     placeTenMarker();
+    query.setBounds(domain);
     buildGrid();
     recompute();
     dirty = false;
@@ -628,7 +651,7 @@ canvas.addEventListener('pointerup', (e) => {
   if (!data.domain.contains(p.x, p.y)) return;
   probe = p;
   updateProbe();
-  placeTenMarker();
+  placeTenMarker(true);
 });
 
 // ---------------------------------------------------------------- loop
@@ -660,6 +683,8 @@ function frame(): void {
       ps.step(dt, ctx());
       particles.update(ps, maxSpeed, white);
     }
+    highlight.update(dt);
+    rig.tick(dt);
     rig.controls.update();
     renderer.render(scene, rig.camera);
     labels.render(scene, rig.camera);

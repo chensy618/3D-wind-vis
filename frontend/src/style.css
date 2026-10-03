@@ -181,3 +181,14 @@ button.wide { width: 100%; }
 }
 #overlay-seg button { white-space: nowrap; padding-left: 4px; padding-right: 4px; }
 #overlay-seg button[data-ov="w"] { flex: 1.7; }
+
+/* ---------------------------------------------------------------- point query */
+.query { display: flex; gap: 6px; }
+.query input {
+  flex: 1; min-width: 0; font: inherit; color: var(--text);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+}
+.query button { flex: none; }
+.query-msg { margin-top: 6px; }
+.query-msg.error { color: #ff9aa8; }
+#probe .pos { color: var(--muted); font-size: 11px; margin-top: 2px; font-variant-numeric: tabular-nums; }

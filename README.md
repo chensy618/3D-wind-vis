@@ -134,6 +134,7 @@ npm run build                                     # static site in frontend/dist
 - **Selected levels** (Mode A) shows one or more chosen levels (tick several in the list), each with its own particles and a translucent surface coloured by speed. **All levels** (Mode B) shows all five levels stacked at their geopotential heights, without surfaces.
 - The timeline has play/pause, previous/next (←/→), space to toggle, drag, and a playback-speed control. **Smooth time interpolation** switches between V(t) = (1−α)V₀ + αV₁ and jumping directly between frames.
 - Click anywhere to inspect a point: lat/lon, terrain height, and u, v, speed and direction for the selected level, plus a vertical profile of all levels.
+- **Query point:** type `lat, lon` (e.g. `69.35, 17.60`; `lon lat` is swapped automatically) to inspect that point the same way. The point is marked with a pulsing ring and the camera pans to it.
 - Sliders set the particle count, visual flow speed and vertical exaggeration.
 
 Particle motion runs on a visual time scale (**Flow speed** = simulated seconds per real
@@ -156,7 +157,7 @@ The page is driven by a model's 10 m wind. Tuning parameters are folded under **
 - **Show:**
   - **Colour:** the terrain by vertical wind (red rising, blue sinking), by 10 m speed, or by elevation only.
   - **Grid:** chooses the model grid (~12 cells over the domain for FCN3) or the 200 m terrain grid (65 536 cells), and the line below it gives the count. The particles follow this choice: one particle per cell, which always respawns inside its cell and moves with the wind of the nearest grid point, with no smoothing between points. Arrows (More settings) use the same grid. **Grid lines** draws the grid.
-- **Point:** click the terrain for the 10 m wind, how far the terrain turned it, and the vertical wind. The point is marked 10 m above the ground.
+- **Point:** click the terrain, or type `lat, lon` under **Query point**, for the 10 m wind, how far the terrain turned it, and the vertical wind. The point gets a pulsing ring and a 10 m marker; a query also pans the camera to it.
 
 Particles, arrows and grids are drawn 10 m above the ground. Particles follow the 200 m terrain at both resolutions so that they stay visible.
 

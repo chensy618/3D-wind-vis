@@ -5,12 +5,14 @@ import { niceMax } from './colormap';
 import { Domain } from './geo';
 import { Annotations, ProbeMarker } from './scene/annotations';
 import { CameraRig, createCamera } from './scene/camera';
+import { Highlight } from './scene/highlight';
 import { LevelSurface } from './scene/levels';
 import { ParticleRenderer } from './scene/particles';
 import { buildDomainFrame, buildTerrainMesh } from './scene/terrain';
 import { Inspector, ProbeRow } from './ui/inspector';
 import { renderLegend } from './ui/legend';
 import { LevelMode, LevelSelector } from './ui/levels';
+import { PointQuery } from './ui/query';
 import { Timeline } from './ui/timeline';
 import { AdvectionContext, ParticleSystem } from './wind/advection';
 import { timeWeights, TimeWeights } from './wind/interpolation';
@@ -47,6 +49,8 @@ interface Loaded {
 let data: Loaded | null = null;
 let rig: CameraRig | null = null;
 let probe: { x: number; y: number } | null = null;
+/** A new probe point (click or query): restart the highlight pulse; `focus`: also pan the camera to it. */
+let probeNew: { focus: boolean } | null = null;
 let surfaceDirty = true;
 let lastProbeT = -1;
 
@@ -68,7 +72,8 @@ scene.add(sun);
 const particles = new ParticleRenderer();
 const ps = new ParticleSystem();
 const marker = new ProbeMarker();
-scene.add(particles.group, marker.group);
+const highlight = new Highlight();
+scene.add(particles.group, marker.group, highlight.group);
 
 // ---------------------------------------------------------------- UI
 const timeline = new Timeline($('#timeline'), {
@@ -87,6 +92,13 @@ const inspector = new Inspector($('#inspector'), () => {
   probe = null;
   inspector.hide();
   marker.hide();
+  highlight.hide();
+});
+const query = new PointQuery($('#query'), (lat, lon) => {
+  if (!data) return;
+  probe = { x: data.domain.localX(lon), y: data.domain.localY(lat) };
+  probeNew = { focus: true };
+  lastProbeT = -1;
 });
 
 function bindRange(id: string, fmt: (v: number) => string, apply: (v: number) => void): void {
@@ -256,7 +268,13 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
     timeline.setData(m.times, m.init_time);
     setTime(Math.min(Math.max(state.t, m.times[0]), m.times[m.times.length - 1]));
     applyExaggeration();
-    if (probe && !domain.contains(probe.x, probe.y)) inspector.hide();
+    query.setBounds(domain);
+    if (probe && !domain.contains(probe.x, probe.y)) {
+      probe = null;
+      inspector.hide();
+      marker.hide();
+      highlight.hide();
+    }
     setLoading(null);
   } catch (err) {
     console.error(err);
@@ -286,6 +304,7 @@ canvas.addEventListener('pointerup', (e) => {
   const p = data.domain.fromScene(hit.point);
   if (!data.domain.contains(p.x, p.y)) return;
   probe = p;
+  probeNew = { focus: false };
   lastProbeT = -1;
 });
 
@@ -313,12 +332,13 @@ function updateProbe(): void {
     maxSpeed: data.maxSpeed,
   });
   const ex = state.exaggeration;
-  marker.set(
-    domain.sceneX(probe.x),
-    domain.sceneZ(probe.y),
-    (ground / 1000) * ex,
-    rows.filter((r) => !r.belowGround).map((r) => (r.height / 1000) * ex),
-  );
+  const X = domain.sceneX(probe.x);
+  const Z = domain.sceneZ(probe.y);
+  const groundY = (ground / 1000) * ex;
+  marker.set(X, Z, groundY, rows.filter((r) => !r.belowGround).map((r) => (r.height / 1000) * ex));
+  highlight.set(X, groundY, Z, probeNew != null);
+  if (probeNew?.focus) rig?.focus(new THREE.Vector3(X, groundY, Z));
+  probeNew = null;
 }
 
 /** Explain empty levels, e.g. 1000 hPa inside a deep low lies below sea level. */
@@ -379,6 +399,8 @@ function frame(): void {
       updateProbe();
       lastProbeT = state.t;
     }
+    highlight.update(dt);
+    rig.tick(dt);
     rig.controls.update();
     renderer.render(scene, rig.camera);
     labels.render(scene, rig.camera);
