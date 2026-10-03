@@ -35,12 +35,15 @@ h2 { font-size: 11px; margin: 0 0 8px; text-transform: uppercase; letter-spacing
 h3 { font-size: 12px; margin: 12px 0 6px; color: var(--muted); font-weight: 600; }
 
 #info { top: 16px; left: 16px; max-width: 420px; }
+.nav { margin-bottom: 6px; font-size: 12px; }
+.nav a { color: var(--accent); text-decoration: none; }
+.nav a:hover { text-decoration: underline; }
 #info .meta { display: flex; gap: 10px; font-weight: 600; color: var(--accent); }
 #info .meta span:empty { display: none; }
 .desc { color: var(--muted); margin-top: 4px; line-height: 1.35; }
 .desc.small { font-size: 11px; }
 
-#controls { top: 118px; left: 16px; width: 260px; max-height: calc(100% - 210px); overflow-y: auto; }
+#controls { top: 140px; left: 16px; width: 260px; max-height: calc(100% - 232px); overflow-y: auto; }
 #controls section { margin-bottom: 14px; }
 
 select, button {
@@ -103,6 +106,7 @@ button.wide { width: 100%; }
 .lg-title span { color: var(--muted); font-weight: 400; }
 .lg-bar { height: 10px; border-radius: 3px; }
 .lg-ticks { position: relative; height: 16px; margin: 0 6px; }
+.lg-ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 2px; }
 .lg-ticks span { position: absolute; top: 3px; transform: translateX(-50%); color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 
 #timeline {
@@ -124,6 +128,8 @@ button.wide { width: 100%; }
 .label3d.level { opacity: 0.55; }
 .label3d.level.on { opacity: 1; color: var(--accent); font-weight: 600; }
 .label3d.north { font-weight: 700; color: #fff; font-size: 13px; }
+.label3d.grid { color: #ffd166; font-weight: 600; }
+.label3d.ten { color: #fff; font-weight: 600; background: rgba(11, 19, 32, 0.75); padding: 2px 6px; border-radius: 4px; }
 
 #loading {
   z-index: 3;
@@ -152,3 +158,26 @@ button.wide { width: 100%; }
   position: absolute; bottom: 96px; left: 50%; transform: translateX(-50%);
   background: var(--panel); border: 1px solid var(--border); color: var(--muted); padding: 8px 12px; border-radius: 8px; max-width: 480px; text-align: center;
 }
+
+/* ---------------------------------------------------------------- surface wind page */
+.surface-page #controls { top: 92px; max-height: calc(100% - 108px); }
+.surface-page #legend { bottom: 16px; }
+.surface-page #controls [hidden] { display: none; }
+#more { margin: 4px 0 10px; }
+#more summary { cursor: pointer; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 8px; }
+#more[open] summary { color: var(--text); }
+.time-row { display: grid; grid-template-columns: 34px 1fr; gap: 8px; align-items: center; }
+.time-row button { height: 30px; padding: 0; }
+.time-row .range { margin-bottom: 0; }
+#data-opts [hidden] { display: none; }
+.surface-page #legend[hidden], #probe[hidden] { display: none; }
+.surface-page input:disabled + *, .surface-page button:disabled { opacity: 0.45; cursor: default; }
+#probe { top: 16px; right: 16px; width: 260px; }
+#probe .kind { margin-top: 6px; font-weight: 600; color: var(--accent); }
+
+@media (max-width: 760px) {
+  .surface-page #controls { bottom: 16px; max-height: 45%; }
+  #probe { left: 16px; width: auto; top: 90px; max-height: 30%; }
+}
+#overlay-seg button { white-space: nowrap; padding-left: 4px; padding-right: 4px; }
+#overlay-seg button[data-ov="w"] { flex: 1.7; }

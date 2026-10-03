@@ -1,6 +1,6 @@
 """Convert a cropped FCN3 forecast (model/fcn3_inference.py) to the common schema.
 
-    raw 0.25 deg u/v/z  ->  Senja grid (bilinear)  ->  height = z / g
+    raw 0.25 deg u/v/z (+ u10m/v10m)  ->  Senja grid (bilinear)  ->  height = z / g
     ->  data/forecast/fcn3_<init>.zarr  +  data/web/fcn3/
 
 Note: FCN3 has ~10 km (E-W) x 28 km (N-S) grid spacing at 69N, so the 64x64
@@ -44,15 +44,26 @@ def convert(raw_path: Path, ny: int, nx: int, name: str) -> xr.Dataset:
                 field = raw.isel(lead_time=it).sel(variable=f"{c}{p}").values
                 out[c][it, il] = regrid(field, src_lat, src_lon, lat, lon)
 
+    # 10 m wind, present in runs of model/fcn3_inference.py that kept it
+    surface = {}
+    if {"u10m", "v10m"} <= set(raw.coords["variable"].values.tolist()):
+        for key, var in (("u10", "u10m"), ("v10", "v10m")):
+            surface[key] = np.stack([
+                regrid(raw.isel(lead_time=it).sel(variable=var).values, src_lat, src_lon, lat, lon)
+                for it in range(len(leads))
+            ])
+
     return build_dataset(
         out["u"], out["v"], geopotential=out["z"],
         lead_hours=leads, levels=LEVELS_HPA, lat=lat, lon=lon,
         attrs={
             "model": name,
             "init_time": raw.attrs.get("init_time", ""),
+            "native_deg": float(abs(src_lat[1] - src_lat[0])),
             "description": f"{raw.attrs.get('model', name)}; IC source {raw.attrs.get('source', '?')}; "
                            "0.25 deg output bilinearly interpolated to the Senja grid",
         },
+        surface=surface,
     )
 
 
@@ -74,6 +85,9 @@ def main() -> None:
         s = ds.sel(level=p)
         print(f"{p:5d} hPa  height {float(s.height.mean()):7.0f} m  "
               f"speed {float(s.wind_speed.min()):5.1f}-{float(s.wind_speed.max()):5.1f} m/s")
+    if "u10" in ds:
+        s10 = np.hypot(ds.u10, ds.v10)
+        print(f" 10 m        speed {float(s10.min()):5.1f}-{float(s10.max()):5.1f} m/s")
 
 
 if __name__ == "__main__":

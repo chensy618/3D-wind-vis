@@ -3,20 +3,12 @@
   {
    "id": "fcn3",
    "label": "FCN3 \u00b7 2024-01-31 06Z"
-  },
-  {
-   "id": "synthetic",
-   "label": "Synthetic"
   }
  ],
  "terrains": [
   {
    "id": "terrain",
    "label": "Senja DTM (Kartverket)"
-  },
-  {
-   "id": "terrain-synthetic",
-   "label": "Synthetic terrain"
   }
  ]
 }

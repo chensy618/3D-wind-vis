@@ -15,7 +15,7 @@ export interface ProbeInfo {
   terrain: number;
   model: string;
   lead: number;
-  selectedLevel: number | null; // index into rows, null in multi-level mode
+  selectedLevels: number[]; // indices into rows; empty in all-levels mode
   rows: ProbeRow[];
   maxSpeed: number;
 }
@@ -44,7 +44,8 @@ export class Inspector {
 
   show(p: ProbeInfo): void {
     this.root.hidden = false;
-    const sel = p.selectedLevel != null ? p.rows[p.selectedLevel] : null;
+    // details for the chosen level when there is exactly one; the profile highlights all chosen
+    const sel = p.selectedLevels.length === 1 ? p.rows[p.selectedLevels[0]] : null;
     const head = sel
       ? `<dl class="kv">
           <dt>Height</dt><dd>${Math.round(sel.height).toLocaleString('en')} m</dd>
@@ -59,7 +60,7 @@ export class Inspector {
       .sort((a, b) => a.r.level - b.r.level)
       .map(
         ({ r, i }) => `
-        <tr class="${i === p.selectedLevel ? 'sel' : ''} ${r.belowGround ? 'below' : ''}">
+        <tr class="${p.selectedLevels.includes(i) ? 'sel' : ''} ${r.belowGround ? 'below' : ''}">
           <td>${r.level}</td>
           <td>${Math.round(r.height)}</td>
           <td><span class="sw" style="background:${colormapCss(r.speed / p.maxSpeed)}"></span>${f1(r.speed)}</td>

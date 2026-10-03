@@ -22,6 +22,15 @@ function landColor(h: number, out: number[]): void {
   for (let k = 0; k < 3; k++) out[k] = srgbToLinear((c0[k] + (c1[k] - c0[k]) * a) / 255);
 }
 
+/** Hypsometric colour (linear RGB) for an elevation in metres; below 0.5 m is water. */
+export function terrainColor(h: number, out: number[]): void {
+  if (h < 0.5) {
+    for (let q = 0; q < 3; q++) out[q] = srgbToLinear(WATER[q] / 255);
+  } else {
+    landColor(h, out);
+  }
+}
+
 /**
  * Terrain mesh in km; vertical exaggeration is applied through mesh.scale.y so
  * it can change without rebuilding the geometry.
@@ -41,11 +50,7 @@ export function buildTerrainMesh(terrain: Terrain, domain: Domain): THREE.Mesh {
       pos[k * 3] = domain.sceneX(domain.localX(lon[i]));
       pos[k * 3 + 1] = h / 1000;
       pos[k * 3 + 2] = z;
-      if (h < 0.5) {
-        for (let q = 0; q < 3; q++) c[q] = srgbToLinear(WATER[q] / 255);
-      } else {
-        landColor(h, c);
-      }
+      terrainColor(h, c);
       col.set(c, k * 3);
     }
   }

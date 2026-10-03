@@ -13,6 +13,10 @@ export interface WindManifest {
   lat: number[];
   lon: number[];
   variables: Record<string, { file: string; units: string; min: number; max: number }>;
+  /** Spacing (degrees) of the model's own lat/lon grid, when known. */
+  native_deg?: number;
+  /** Optional surface fields (u10, v10), laid out (time, lat, lon). */
+  surface?: Record<string, { file: string; units: string; min: number; max: number }>;
 }
 
 export interface TerrainManifest {
@@ -66,6 +70,9 @@ export class WindField {
     readonly v: Float32Array,
     readonly height: Float32Array,
     readonly speed: Float32Array,
+    /** 10 m wind (time, lat, lon), when the model provides it */
+    readonly u10: Float32Array | null = null,
+    readonly v10: Float32Array | null = null,
   ) {
     [this.nt, this.nl, this.ny, this.nx] = manifest.shape;
     this.grid = new RegularGrid(manifest.lat, manifest.lon);
@@ -83,6 +90,11 @@ export class WindField {
     return sampleSpaceTime(field, tw, level, this.ny, this.nx, this.nl, this.grid.fy(lat), this.grid.fx(lon));
   }
 
+  /** Sample a (time, lat, lon) surface field. */
+  sampleSurface(field: Float32Array, tw: TimeWeights, lat: number, lon: number): number {
+    return sampleSpaceTime(field, tw, 0, this.ny, this.nx, 1, this.grid.fy(lat), this.grid.fx(lon));
+  }
+
   /** Mean geopotential height of a level at a frame (m). */
   meanHeight(level: number, frame = 0): number {
     const n = this.ny * this.nx;
@@ -93,14 +105,23 @@ export class WindField {
   }
 }
 
+export function loadWindManifest(id: string, base = 'data'): Promise<WindManifest> {
+  return fetchJson<WindManifest>(`${base}/${id}/manifest.json`);
+}
+
 export async function loadWind(id: string, base = 'data'): Promise<WindField> {
   const dir = `${base}/${id}`;
-  const m = await fetchJson<WindManifest>(`${dir}/manifest.json`);
+  const m = await loadWindManifest(id, base);
   const n = m.shape.reduce((a, b) => a * b, 1);
   const [u, v, h, s] = await Promise.all(
     ['u', 'v', 'height', 'wind_speed'].map((k) => fetchF32(`${dir}/${m.variables[k].file}`, n)),
   );
-  return new WindField(m, u, v, h, s);
+  const sf = m.surface;
+  const [u10, v10] =
+    sf?.u10 && sf?.v10
+      ? await Promise.all([sf.u10, sf.v10].map((x) => fetchF32(`${dir}/${x.file}`, m.shape[0] * m.shape[2] * m.shape[3])))
+      : [null, null];
+  return new WindField(m, u, v, h, s, u10, v10);
 }
 
 export class Terrain {

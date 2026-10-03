@@ -1,15 +1,26 @@
 import * as THREE from 'three';
 import { colormapLinear } from '../colormap';
-import { ParticleSystem, TRAIL } from '../wind/advection';
+import { TRAIL } from '../wind/advection';
 
-const SEGS = TRAIL - 1;
+/** What the renderer reads from a particle system (trail k = 0 is the newest position). */
+export interface ParticleTrails {
+  n: number;
+  /** stored positions per particle; TRAIL when omitted */
+  trailLen?: number;
+  trail: Float32Array;
+  speed: Float32Array;
+  age: Float32Array;
+  maxAge: Float32Array;
+  alive: Uint8Array;
+}
 
-/** Fading streak lines + bright heads, colored by wind speed. */
+/** Fading streak lines + bright heads, colored by wind speed unless `color` is given. */
 export class ParticleRenderer {
   readonly group = new THREE.Group();
   private lines: THREE.LineSegments;
   private heads: THREE.Points;
   private capacity = 0;
+  private segs = 0;
   private rgb = new Float32Array(3);
 
   constructor() {
@@ -33,20 +44,28 @@ export class ParticleRenderer {
     this.group.name = 'particles';
   }
 
-  private ensure(n: number): void {
-    if (n === this.capacity) return;
+  /** Head size in pixels. */
+  setHeadSize(px: number): void {
+    (this.heads.material as THREE.PointsMaterial).size = px;
+  }
+
+  private ensure(n: number, segs: number): void {
+    if (n === this.capacity && segs === this.segs) return;
     this.capacity = n;
+    this.segs = segs;
     const lg = this.lines.geometry;
-    lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * SEGS * 2 * 3), 3));
-    lg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * SEGS * 2 * 4), 4));
+    lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * segs * 2 * 3), 3));
+    lg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * segs * 2 * 4), 4));
     const hg = this.heads.geometry;
     hg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
     hg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 4), 4));
   }
 
-  update(ps: ParticleSystem, maxSpeed: number): void {
+  update(ps: ParticleTrails, maxSpeed: number, color?: (i: number, out: Float32Array) => void): void {
     const n = ps.n;
-    this.ensure(n);
+    const len = ps.trailLen ?? TRAIL;
+    const SEGS = len - 1;
+    this.ensure(n, SEGS);
     const lpos = this.lines.geometry.getAttribute('position') as THREE.BufferAttribute;
     const lcol = this.lines.geometry.getAttribute('color') as THREE.BufferAttribute;
     const hpos = this.heads.geometry.getAttribute('position') as THREE.BufferAttribute;
@@ -59,8 +78,9 @@ export class ParticleRenderer {
     const rgb = this.rgb;
 
     for (let i = 0; i < n; i++) {
-      const base = i * TRAIL * 3;
-      colormapLinear(ps.speed[i] / maxSpeed, rgb);
+      const base = i * len * 3;
+      if (color) color(i, rgb);
+      else colormapLinear(ps.speed[i] / maxSpeed, rgb);
       // fade in at birth and out at death
       const life = ps.age[i] / ps.maxAge[i];
       const fade = ps.alive[i] ? Math.min(1, ps.age[i] * 3, (1 - life) * 4) : 0;

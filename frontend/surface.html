@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Senja Surface Wind</title>
+  </head>
+  <body class="surface-page">
+    <div id="app">
+      <canvas id="view"></canvas>
+
+      <header class="panel" id="info">
+        <nav class="nav"><a href="./index.html">← 3D pressure levels</a></nav>
+        <h1>Senja 10 m Surface Wind</h1>
+      </header>
+
+      <aside class="panel" id="controls">
+        <section>
+          <h2>10 m wind</h2>
+          <div class="field">Model</div>
+          <div class="seg" id="res-seg" role="radiogroup" aria-label="Wind model"></div>
+          <div class="time-row">
+            <button id="data-play" title="Play / pause" aria-label="Play">▶</button>
+            <label class="range"><output id="data-time-out"></output>
+              <input id="data-time" type="range" min="0" max="24" step="0.5" value="0" aria-label="Forecast time" />
+            </label>
+          </div>
+          <label class="check" title="Add the effect of the 200 m terrain: speed-up, deflection, shelter, rising and sinking air"><input id="terrain-adjust" type="checkbox" checked /> Terrain adjustment</label>
+        </section>
+        <section>
+          <h2>Show</h2>
+          <div class="seg" id="overlay-seg" role="radiogroup" aria-label="Terrain colour">
+            <button data-ov="w" class="on" title="Red: air rising on windward slopes. Blue: air sinking on lee slopes">Vertical wind</button>
+            <button data-ov="speed" title="10 m wind speed">Speed</button>
+            <button data-ov="terrain" title="Elevation only">Terrain</button>
+          </div>
+          <label class="field">Grid
+            <select id="grid" aria-label="Grid: one particle per grid cell">
+              <option value="native" id="grid-native">Model grid</option>
+              <option value="terrain" id="grid-terrain">Terrain grid</option>
+            </select>
+          </label>
+          <label class="check"><input id="grid-lines" type="checkbox" /> Grid lines</label>
+          <div class="desc small" id="grid-info"></div>
+        </section>
+        <details id="more">
+          <summary>More settings</summary>
+          <label class="range">Flow speed <output id="flow-speed-out"></output>
+            <input id="flow-speed" type="range" min="50" max="1000" step="25" value="300" />
+          </label>
+          <label class="range">Vertical exaggeration <output id="exaggeration-out"></output>
+            <input id="exaggeration" type="range" min="1" max="8" step="0.5" value="2.5" />
+          </label>
+          <label class="check"><input id="show-arrows" type="checkbox" /> Wind arrows</label>
+          <label class="field">Terrain <select id="terrain" aria-label="Terrain"></select></label>
+          <button id="reset-camera" class="wide">Reset camera</button>
+        </details>
+        <div class="hint">Everything is 10 m above the ground. Click the terrain to inspect a point.</div>
+      </aside>
+
+      <aside class="panel" id="probe" hidden></aside>
+      <div class="panel" id="legend"></div>
+
+      <div id="loading" hidden><div class="spinner"></div><span>Loading…</span></div>
+      <div id="error" role="alert" hidden></div>
+    </div>
+    <script type="module" src="/src/surface/main.ts"></script>
+  </body>
+</html>

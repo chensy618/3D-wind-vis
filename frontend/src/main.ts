@@ -25,7 +25,7 @@ const state = {
   rate: 1, // forecast hours per second
   smooth: true, // temporal interpolation between forecast steps
   mode: 'single' as LevelMode,
-  level: 2,
+  levels: [2], // chosen level indices in Mode A
   nParticles: 4000,
   speedFactor: 300, // simulated seconds per real second for particle motion
   exaggeration: 4,
@@ -39,7 +39,8 @@ interface Loaded {
   maxSpeed: number;
   content: THREE.Group;
   terrainMesh: THREE.Mesh;
-  surface: LevelSurface;
+  /** one level surface per pressure level, shown for the chosen levels */
+  surfaces: LevelSurface[];
   annotations: Annotations;
 }
 
@@ -75,9 +76,9 @@ const timeline = new Timeline($('#timeline'), {
   onPlay: (p) => (state.playing = p),
   onRate: (r) => (state.rate = r),
 });
-const levelSel = new LevelSelector($('#levels'), (mode, level) => {
+const levelSel = new LevelSelector($('#levels'), (mode, levels) => {
   state.mode = mode;
-  state.level = level;
+  state.levels = levels;
   resetParticles();
   surfaceDirty = true;
   lastProbeT = -1;
@@ -137,7 +138,7 @@ function currentTw(): TimeWeights {
 
 function activeLevels(): number[] {
   if (!data) return [];
-  return state.mode === 'multi' ? data.wind.levels.map((_, i) => i) : [state.level];
+  return state.mode === 'multi' ? data.wind.levels.map((_, i) => i) : state.levels;
 }
 
 function advCtx(): AdvectionContext {
@@ -154,7 +155,8 @@ function advCtx(): AdvectionContext {
 
 function resetParticles(): void {
   if (!data) return;
-  const n = state.mode === 'multi' ? state.nParticles : Math.round(state.nParticles / 2);
+  // Mode A: half the particle budget per chosen level, up to 1.5× the budget
+  const n = state.mode === 'multi' ? state.nParticles : Math.round((state.nParticles / 2) * Math.min(state.levels.length, 3));
   ps.reset(n, activeLevels(), advCtx());
   const active = data.wind.levels.map((_, i) => activeLevels().includes(i));
   data.annotations.highlight(active);
@@ -220,9 +222,9 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
     }
     const content = new THREE.Group();
     const terrainMesh = buildTerrainMesh(terrain, domain);
-    const surface = new LevelSurface(wind, domain);
+    const surfaces = wind.levels.map(() => new LevelSurface(wind, domain));
     const annotations = new Annotations(domain);
-    content.add(terrainMesh, surface.mesh, annotations.group);
+    content.add(terrainMesh, ...surfaces.map((s) => s.mesh), annotations.group);
     scene.add(content);
 
     data = {
@@ -232,7 +234,7 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
       maxSpeed: niceMax(wind.manifest.variables.wind_speed.max),
       content,
       terrainMesh,
-      surface,
+      surfaces,
       annotations,
     };
 
@@ -248,8 +250,9 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
     $('#terrain-src').textContent = terrain.manifest.source;
     renderLegend($('#legend'), data.maxSpeed);
 
-    state.level = Math.min(state.level, m.levels.length - 1);
-    levelSel.setLevels(m.levels, meanHeights(wind), state.level);
+    state.levels = state.levels.filter((i) => i < m.levels.length);
+    if (!state.levels.length) state.levels = [Math.min(2, m.levels.length - 1)];
+    levelSel.setLevels(m.levels, meanHeights(wind), state.levels);
     timeline.setData(m.times, m.init_time);
     setTime(Math.min(Math.max(state.t, m.times[0]), m.times[m.times.length - 1]));
     applyExaggeration();
@@ -277,8 +280,7 @@ canvas.addEventListener('pointerup', (e) => {
     -((e.clientY - rect.top) / rect.height) * 2 + 1,
   );
   raycaster.setFromCamera(ndc, rig.camera);
-  const targets: THREE.Object3D[] = [data.terrainMesh];
-  if (data.surface.mesh.visible) targets.unshift(data.surface.mesh);
+  const targets: THREE.Object3D[] = [...data.surfaces.map((s) => s.mesh).filter((m) => m.visible), data.terrainMesh];
   const hit = raycaster.intersectObjects(targets, false)[0];
   if (!hit) return;
   const p = data.domain.fromScene(hit.point);
@@ -306,7 +308,7 @@ function updateProbe(): void {
     terrain: ground,
     model: wind.manifest.model,
     lead: state.t,
-    selectedLevel: state.mode === 'single' ? state.level : null,
+    selectedLevels: state.mode === 'single' ? state.levels : [],
     rows,
     maxSpeed: data.maxSpeed,
   });
@@ -322,16 +324,19 @@ function updateProbe(): void {
 /** Explain empty levels, e.g. 1000 hPa inside a deep low lies below sea level. */
 function updateNotice(): void {
   const el = $('#notice');
-  let alive = 0;
-  for (let i = 0; i < ps.n; i++) alive += ps.alive[i];
-  if (!data || ps.n === 0 || alive > 0 || state.mode !== 'single') {
+  if (!data || ps.n === 0 || state.mode !== 'single') {
     el.hidden = true;
     return;
   }
-  const p = data.wind.levels[state.level];
-  el.hidden = false;
-  el.textContent = `${p} hPa lies below the terrain everywhere in this domain at T+${Math.round(state.t)} h ` +
-    `(surface pressure < ${p} hPa), so there is no wind to show at this level.`;
+  // chosen levels with no live particle lie below the terrain everywhere
+  const alive = new Set<number>();
+  for (let i = 0; i < ps.n; i++) if (ps.alive[i]) alive.add(ps.level[i]);
+  const empty = state.levels.filter((i) => !alive.has(i)).map((i) => `${data!.wind.levels[i]} hPa`);
+  el.hidden = empty.length === 0;
+  if (!empty.length) return;
+  const one = empty.length === 1;
+  el.textContent = `${empty.join(' and ')} ${one ? 'lies' : 'lie'} below the terrain everywhere in this domain at ` +
+    `T+${Math.round(state.t)} h (surface pressure lower than that), so there is no wind to show at ${one ? 'this level' : 'these levels'}.`;
 }
 
 // ---------------------------------------------------------------- loop
@@ -362,11 +367,13 @@ function frame(): void {
     ps.step(dt, ctx);
     particles.update(ps, data.maxSpeed);
 
-    const showSurface = state.showSurface && state.mode === 'single';
-    data.surface.mesh.visible = showSurface;
-    if (showSurface && surfaceDirty) {
-      data.surface.update(state.level, ctx.tw, data.terrain, state.exaggeration, data.maxSpeed, 0.35);
-    }
+    // one translucent surface per chosen level; fainter when several are stacked
+    const opacity = state.levels.length > 1 ? 0.25 : 0.35;
+    data.surfaces.forEach((s, i) => {
+      const show = state.showSurface && state.mode === 'single' && state.levels.includes(i);
+      s.mesh.visible = show;
+      if (show && surfaceDirty) s.update(i, ctx.tw, data!.terrain, state.exaggeration, data!.maxSpeed, opacity);
+    });
     surfaceDirty = false;
     if (probe && Math.abs(state.t - lastProbeT) > 0.05) {
       updateProbe();
