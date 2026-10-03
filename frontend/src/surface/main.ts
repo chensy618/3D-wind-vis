@@ -29,7 +29,7 @@ type Overlay = 'w' | 'speed' | 'terrain';
  */
 const params: SurfaceParams = { layerDepth: 800, shelter: 0.6 };
 const view = {
-  overlay: 'w' as Overlay,
+  overlay: 'terrain' as Overlay,
   /** add the terrain response to the model's wind */
   terrainAdjust: true,
   /** grid that sets the particles (one per cell) and the grid lines */

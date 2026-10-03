@@ -155,7 +155,7 @@ The page is driven by a model's 10 m wind. Tuning parameters are folded under **
   - **Time:** a slider from T+0 to T+24 h, with playback.
   - **Terrain adjustment:** off shows the model as it is, one wind per model grid cell, with vertical wind from each cell's mean slope. On, the model wind is interpolated to the 200 m terrain grid and goes through the terrain response below. Both share the colour scales of the adjusted field, so the raw model's weak vertical wind is not stretched to look strong.
 - **Show:**
-  - **Colour:** the terrain by vertical wind (red rising, blue sinking), by 10 m speed, or by elevation only.
+  - **Colour:** the terrain by elevation only (default), by 10 m speed, or by vertical wind (red rising, blue sinking).
   - **Grid:** chooses the model grid (~12 cells over the domain for FCN3) or the 200 m terrain grid (65 536 cells), and the line below it gives the count. The particles follow this choice: one particle per cell, which always respawns inside its cell and moves with the wind of the nearest grid point, with no smoothing between points. Arrows (More settings) use the same grid. **Grid lines** draws the grid.
 - **Point:** click the terrain, or type `lat, lon` under **Query point**, for the 10 m wind, how far the terrain turned it, and the vertical wind. The point gets a pulsing ring and a 10 m marker; a query also pans the camera to it.
 
