@@ -1,6 +1,10 @@
 {
  "datasets": [
   {
+   "id": "aurora01",
+   "label": "Aurora \u00b7 2024-01-31 06Z"
+  },
+  {
    "id": "fcn3",
    "label": "FCN3 \u00b7 2024-01-31 06Z"
   }

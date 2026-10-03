@@ -7,10 +7,10 @@ FCN3 (pretrained)  →  Senja crop  →  u / v / geopotential, 10 m wind  →  c
                                                                                               + Kartverket DTM terrain
 ```
 
-The pretrained model is **FourCastNet v3 (FCN3)** from earth2studio, not Aurora as in the
-original plan (`senja_3d_wind_mvp_plan.md`). The viewer reads only the common schema, so
-Aurora, GraphCast, ERA5, CARRA or the U-NO/GNO/NOFE models can be added later by writing
-another converter.
+Two pretrained models drive the viewers: **FourCastNet v3 (FCN3, 0.25°)** from earth2studio,
+started from ERA5, and **Aurora 0.1° Fine-Tuned** (Microsoft, `AuroraHighRes`), started from
+IFS HRES analysis. The viewers read only the common schema, so GraphCast, ERA5, CARRA or the
+U-NO/GNO/NOFE models can be added later by writing another converter.
 
 ## Quick start (local machine)
 
@@ -36,6 +36,7 @@ from a shell with Developer Mode enabled. macOS and Linux work as-is.
 Included in `data/web/` (3.7 MB, everything the viewer loads):
 
 - FCN3 forecast initialized 2024-01-31 06 UTC: T+0 to T+24 h, 5 pressure levels (u, v, height, wind speed) and the 10 m wind
+- Aurora 0.1° forecast for the same case and the same fields (65 model grid points over Senja, against 12 for FCN3)
 - Senja terrain: Kartverket DTM resampled to 256 × 256
 
 Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the scripts):
@@ -44,6 +45,8 @@ Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the
 |---|---|---|---|
 | Source DTM GeoTIFF, 25 m | 19 MB | `data/terrain/senja_dtm_25m_25833.tif` | `python preprocessing/terrain.py` |
 | Raw FCN3 crop (`.nc`) and common-schema `.zarr` | 1.4 MB | `data/forecast/` | `sbatch jobs/run_fcn3_senja.slurm`, then `convert_fcn3.py` |
+| Raw Aurora 0.1° crop (`.nc`) and `.zarr` | 2 MB | `data/forecast/` | `aurora01_inference.py --fetch-only`, `sbatch jobs/run_aurora01_senja.slurm`, then `convert_fcn3.py` |
+| IFS HRES analysis GRIB (Aurora input) and Aurora 0.1° weights | 6.5 + 4.9 GB | `/cluster/work/projects/nn8106k/siyan/{aurora01_cache,windvis_weights/aurora-0.1}` | `aurora01_inference.py --fetch-only` |
 
 The preprocessing scripts run on any machine after `pip install -r requirements.txt`
 (`terrain.py` downloads from Kartverket, so it needs internet). FCN3 inference needs an
@@ -56,6 +59,8 @@ the small output back.
 ```
 model/fcn3_inference.py        FCN3 forecast on a GPU node → data/forecast/fcn3_<init>.nc (Senja crop)
 jobs/run_fcn3_senja.slurm      SLURM wrapper (accel partition, earth2studio env)
+model/aurora01_inference.py    Aurora 0.1°: fetch IFS HRES analysis (login node), run on a GPU node → data/forecast/aurora01_<init>.nc
+jobs/run_aurora01_senja.slurm  SLURM wrapper (GH200, earth2studio env + microsoft-aurora on PYTHONPATH)
 preprocessing/common_schema.py common schema, zarr writer, web export, data index
 preprocessing/convert_fcn3.py  raw FCN3 crop → common schema (.zarr + web export)
 preprocessing/terrain.py       Kartverket NHM DTM (WCS) → Senja terrain grid
@@ -105,6 +110,13 @@ $PY preprocessing/terrain.py                      # --n 500 for a finer mesh
 # 2. FCN3 forecast (≈12 min, mostly the CDS download)
 sbatch jobs/run_fcn3_senja.slurm                  # or: sbatch jobs/run_fcn3_senja.slurm 2024-01-31T06:00:00 cds
 $PY preprocessing/convert_fcn3.py data/forecast/fcn3_20240131T06.nc
+
+# 2b. Aurora 0.1° (≈30 min download once, ≈3 min on one GH200)
+#     IFS HRES analysis at t-6 h and t from NCAR GDEX (d113001, formerly RDA), anonymous
+$PY model/aurora01_inference.py --fetch-only     # login node: GRIB + checkpoint + static fields
+pip install --no-deps --target /cluster/work/projects/nn8106k/siyan/pylib/aurora microsoft-aurora==2.0.1   # once
+sbatch jobs/run_aurora01_senja.slurm              # or: sbatch jobs/run_aurora01_senja.slurm 2024-01-31T06
+$PY preprocessing/convert_fcn3.py data/forecast/aurora01_20240131T06.nc --name Aurora --web-dir aurora01
 
 # 3. viewer
 module load NRIS/CPU; module load nodejs/20.13.1-GCCcore-13.3.0

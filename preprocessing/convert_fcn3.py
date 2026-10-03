@@ -1,4 +1,8 @@
-"""Convert a cropped FCN3 forecast (model/fcn3_inference.py) to the common schema.
+"""Convert a cropped model forecast to the common schema.
+
+Works for any raw crop in the layout of model/fcn3_inference.py (FCN3) and
+model/aurora01_inference.py (Aurora 0.1°): one DataArray with dims
+(lead_time, variable, lat, lon) and variables u/v/z<level> (+ u10m, v10m).
 
     raw 0.25 deg u/v/z (+ u10m/v10m)  ->  Senja grid (bilinear)  ->  height = z / g
     ->  data/forecast/fcn3_<init>.zarr  +  data/web/fcn3/
@@ -9,6 +13,7 @@ viewer is built so that higher-resolution models can replace it unchanged.
 
 Usage:
     python preprocessing/convert_fcn3.py data/forecast/fcn3_2024013106.nc
+    python preprocessing/convert_fcn3.py data/forecast/aurora01_20240131T06.nc --name Aurora --web-dir aurora01
 """
 
 from __future__ import annotations
@@ -32,7 +37,8 @@ def regrid(field: np.ndarray, src_lat, src_lon, lat, lon) -> np.ndarray:
 
 
 def convert(raw_path: Path, ny: int, nx: int, name: str) -> xr.Dataset:
-    raw = xr.open_dataset(raw_path)["fcn3"]
+    ds = xr.open_dataset(raw_path)
+    raw = ds[list(ds.data_vars)[0]]  # "fcn3", "aurora", ...
     src_lat, src_lon = raw.lat.values, raw.lon.values
     lat, lon = target_grid(ny, nx)
     leads = [int(x) for x in raw.lead_time.values]
@@ -59,9 +65,9 @@ def convert(raw_path: Path, ny: int, nx: int, name: str) -> xr.Dataset:
         attrs={
             "model": name,
             "init_time": raw.attrs.get("init_time", ""),
-            "native_deg": float(abs(src_lat[1] - src_lat[0])),
+            "native_deg": round(float(abs(src_lat[1] - src_lat[0])), 4),
             "description": f"{raw.attrs.get('model', name)}; IC source {raw.attrs.get('source', '?')}; "
-                           "0.25 deg output bilinearly interpolated to the Senja grid",
+                           f"{abs(src_lat[1] - src_lat[0]):g} deg output bilinearly interpolated to the Senja grid",
         },
         surface=surface,
     )

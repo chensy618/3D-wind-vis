@@ -149,12 +149,14 @@ function buildGrid(): void {
 function updateGridInfo(): void {
   if (!data || !source.model) return;
   const m = source.model;
-  const km = (x0: number, x1: number) => Math.round(x1 - x0);
-  const full = data.nativeCells.reduce((a, c) => (c.x1 - c.x0 > a.x1 - a.x0 ? c : a));
+  // full cell size: the largest extent in each direction (edge cells are clipped by the domain)
+  const fmt = (km: number) => (km < 10 ? km.toFixed(1) : Math.round(km).toString());
+  const w = Math.max(...data.nativeCells.map((c) => c.x1 - c.x0));
+  const h = Math.max(...data.nativeCells.map((c) => c.y1 - c.y0));
   $('#grid-native').textContent = `${m.name} (${m.deg}°)`;
   $('#grid-terrain').textContent = `Terrain (${Math.round((data.model.dx * 1000) / 50) * 50} m)`;
   const n = view.grid === 'native' ? data.nativeCells.length : data.gridCells.length;
-  const size = view.grid === 'native' ? `~${km(full.x0, full.x1)} × ${km(full.y0, full.y1)} km` : `${Math.round(data.model.dx * 1000)} m`;
+  const size = view.grid === 'native' ? `~${fmt(w)} × ${fmt(h)} km` : `${Math.round(data.model.dx * 1000)} m`;
   $('#grid-info').textContent = `${n.toLocaleString('en')} cells of ${size}: one particle each`;
 }
 
