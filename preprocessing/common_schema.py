@@ -1,6 +1,6 @@
 """Common Wind Schema shared by every model converter.
 
-Every source (FCN3, GraphCast, ERA5, CARRA, U-NO, GNO, NOFE) is
+Every source (FCN3, GraphCast, ERA5, CARRA, U-NO, GNO, NOFE, synthetic) is
 converted to the same xarray Dataset before it reaches the viewer:
 
     dims:       time (lead hours), level (hPa), latitude, longitude
@@ -192,7 +192,8 @@ def update_index(web_root: str | Path) -> Path:
             label = meta["model"] + (f" · {init.replace('T', ' ')}Z" if init[:2].isdigit() else "")
             datasets.append({"id": entry_id, "label": label})
         elif meta.get("file") == "elevation.bin":
-            terrains.append({"id": entry_id, "label": "Senja DTM (Kartverket)"})
+            terrains.append({"id": entry_id, "label": "Synthetic terrain" if meta["source"] == "synthetic"
+                             else "Senja DTM (Kartverket)"})
     index = {"datasets": datasets, "terrains": terrains}
     (root / "index.json").write_text(json.dumps(index, indent=1))
     return root / "index.json"

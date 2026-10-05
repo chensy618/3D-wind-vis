@@ -40,6 +40,7 @@ Included in `data/web/` (3.7 MB, everything the viewer loads):
 - Aurora 0.1° forecast for the same case and the same fields (65 model grid points over Senja, against 12 for FCN3)
 - GraphCast 0.25° forecast for the same case and the same fields (12 grid points; same ERA5 initial state as FCN3)
 - Senja terrain: Kartverket DTM resampled to 256 × 256
+- Synthetic wind field (with a 10 m wind) and synthetic terrain, for testing the frontend
 
 Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the scripts):
 
@@ -51,6 +52,7 @@ Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the
 | Raw GraphCast 0.25° crop (`.nc`) and `.zarr` | 0.5 MB | `data/forecast/` | `graphcast_inference.py --fetch-only`, `sbatch jobs/run_graphcast_senja.slurm`, then `convert_fcn3.py` |
 | ERA5 input (GraphCast) and GraphCast 0.25° weights | 0.7 + 0.14 GB | `/cluster/work/projects/nn8106k/siyan/{graphcast_cache,windvis_weights/graphcast-operational}` | `graphcast_inference.py --fetch-only` |
 | IFS HRES analysis GRIB (Aurora input) and Aurora 0.1° weights | 6.5 + 4.9 GB | `/cluster/work/projects/nn8106k/siyan/{aurora01_cache,windvis_weights/aurora-0.1}` | `aurora01_inference.py --fetch-only` |
+| Synthetic `.zarr` | 0.9 MB | `data/synthetic/` | `python preprocessing/make_synthetic.py` |
 
 The preprocessing scripts run on any machine after `pip install -r requirements.txt`
 (`terrain.py` downloads from Kartverket, so it needs internet). FCN3 inference needs an
@@ -69,6 +71,7 @@ model/graphcast_inference.py   GraphCast 0.25°: fetch ERA5 from ARCO (login nod
 jobs/run_graphcast_senja.slurm SLURM wrapper (GH200, earth2studio-graphcast env: jax[cuda13], dm-haiku, graphcast)
 preprocessing/common_schema.py common schema, zarr writer, web export, data index
 preprocessing/convert_fcn3.py  raw FCN3 crop → common schema (.zarr + web export)
+preprocessing/make_synthetic.py Phase 0 synthetic wind + synthetic terrain
 preprocessing/terrain.py       Kartverket NHM DTM (WCS) → Senja terrain grid
 data/terrain/                  source DTM GeoTIFF (25 m, EPSG:25833), kept for later high-res work
 data/forecast/                 raw model crops + common-schema .zarr
@@ -110,7 +113,8 @@ Python environments (Olivia):
 ```bash
 PY=/cluster/projects/nn8106k/siyan/envs/wind-vis-cpu/bin/python
 
-# 1. terrain
+# 1. synthetic data (Phase 0) and real terrain
+$PY preprocessing/make_synthetic.py
 $PY preprocessing/terrain.py                      # --n 500 for a finer mesh
 
 # 2. FCN3 forecast (≈12 min, mostly the CDS download)
@@ -136,7 +140,7 @@ npm run build                                     # static site in frontend/dist
 ```
 
 `frontend/public/data` is a symlink to `data/web`. URL parameters select the data, e.g.
-`?data=fcn3&terrain=terrain`.
+`?data=fcn3&terrain=terrain`, or `?data=synthetic&terrain=terrain-synthetic` for the synthetic test data.
 
 ## Viewer
 
@@ -162,7 +166,7 @@ the DTM.
 The page is driven by a model's 10 m wind. Tuning parameters are folded under **More settings**.
 
 - **10 m wind:**
-  - **Model:** every dataset with a 10 m wind field. Today that is FCN3 at 0.25°; a finer model added later appears here with its own grid. The grid spacing comes from `native_deg` in the manifest.
+  - **Model:** every dataset with a 10 m wind field. Today that is FCN3, GraphCast and Aurora, plus the synthetic field (on a 0.25° grid) for testing; a finer model added later appears here with its own grid. The grid spacing comes from `native_deg` in the manifest.
   - **Time:** a slider from T+0 to T+24 h, with playback.
   - **Terrain adjustment:** off shows the model as it is, one wind per model grid cell, with vertical wind from each cell's mean slope. On, the model wind is interpolated to the 200 m terrain grid and goes through the terrain response below. Both share the colour scales of the adjusted field, so the raw model's weak vertical wind is not stretched to look strong.
 - **Show:**
