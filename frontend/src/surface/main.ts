@@ -307,10 +307,8 @@ bindRange('exaggeration', (v) => `×${v}`, (v) => {
   placeTenMarker();
 });
 
-$('#res-seg').addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-model]');
-  if (b) void setModel(b.dataset.model!);
-});
+const modelSel = $<HTMLSelectElement>('#model');
+modelSel.addEventListener('change', () => void setModel(modelSel.value));
 $<HTMLInputElement>('#terrain-adjust').addEventListener('change', (e) => {
   view.terrainAdjust = (e.target as HTMLInputElement).checked;
   dirty = true;
@@ -363,7 +361,6 @@ async function setModel(id: string, rebuild = true): Promise<void> {
     const w = await loadWind(id);
     source.model = entry;
     source.wind = w;
-    setSeg($('#res-seg'), 'model', id);
     timeInp.min = String(w.times[0]);
     timeInp.max = String(w.times[w.times.length - 1]);
     source.t = Math.min(Math.max(source.t, w.times[0]), w.times[w.times.length - 1]);
@@ -382,6 +379,7 @@ async function setModel(id: string, rebuild = true): Promise<void> {
   } catch (err) {
     showError(`Could not load ${entry.name}: ${(err as Error).message}`);
   } finally {
+    modelSel.value = source.model?.id ?? id;
     setLoading(null);
   }
 }
@@ -711,8 +709,8 @@ async function start(): Promise<void> {
       return m?.surface?.u10 ? [{ id: d.id, name: m.model, deg: m.native_deg ?? 0.25 }] : [];
     });
     if (!source.models.length) throw new Error('no dataset with a 10 m wind field; run FCN3 and convert_fcn3.py (see README)');
-    $('#res-seg').innerHTML = source.models
-      .map((m) => `<button data-model="${m.id}" title="${m.name}, ${m.deg}° grid">${m.name} ${m.deg}°</button>`)
+    modelSel.innerHTML = source.models
+      .map((m) => `<option value="${m.id}">${m.name} ${m.deg}°</option>`)
       .join('');
     await setModel(source.models[0].id, false);
     const terrainSel = $<HTMLSelectElement>('#terrain');
