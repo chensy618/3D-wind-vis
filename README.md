@@ -7,10 +7,11 @@ FCN3 (pretrained)  →  Senja crop  →  u / v / geopotential, 10 m wind  →  c
                                                                                               + Kartverket DTM terrain
 ```
 
-Two pretrained models drive the viewers: **FourCastNet v3 (FCN3, 0.25°)** from earth2studio,
-started from ERA5, and **Aurora 0.1° Fine-Tuned** (Microsoft, `AuroraHighRes`), started from
-IFS HRES analysis. The viewers read only the common schema, so GraphCast, ERA5, CARRA or the
-U-NO/GNO/NOFE models can be added later by writing another converter.
+Three pretrained models drive the viewers: **FourCastNet v3 (FCN3, 0.25°)** from earth2studio
+and **GraphCast 0.25°** (Google DeepMind, `GraphCast_operational`), both started from ERA5, and
+**Aurora 0.1° Fine-Tuned** (Microsoft, `AuroraHighRes`), started from IFS HRES analysis. The
+viewers read only the common schema, so ERA5, CARRA or the U-NO/GNO/NOFE models can be added
+later by writing another converter.
 
 ## Quick start (local machine)
 
@@ -37,6 +38,7 @@ Included in `data/web/` (3.7 MB, everything the viewer loads):
 
 - FCN3 forecast initialized 2024-01-31 06 UTC: T+0 to T+24 h, 5 pressure levels (u, v, height, wind speed) and the 10 m wind
 - Aurora 0.1° forecast for the same case and the same fields (65 model grid points over Senja, against 12 for FCN3)
+- GraphCast 0.25° forecast for the same case and the same fields (12 grid points; same ERA5 initial state as FCN3)
 - Senja terrain: Kartverket DTM resampled to 256 × 256
 
 Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the scripts):
@@ -46,6 +48,8 @@ Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the
 | Source DTM GeoTIFF, 25 m | 19 MB | `data/terrain/senja_dtm_25m_25833.tif` | `python preprocessing/terrain.py` |
 | Raw FCN3 crop (`.nc`) and common-schema `.zarr` | 1.4 MB | `data/forecast/` | `sbatch jobs/run_fcn3_senja.slurm`, then `convert_fcn3.py` |
 | Raw Aurora 0.1° crop (`.nc`) and `.zarr` | 2 MB | `data/forecast/` | `aurora01_inference.py --fetch-only`, `sbatch jobs/run_aurora01_senja.slurm`, then `convert_fcn3.py` |
+| Raw GraphCast 0.25° crop (`.nc`) and `.zarr` | 0.5 MB | `data/forecast/` | `graphcast_inference.py --fetch-only`, `sbatch jobs/run_graphcast_senja.slurm`, then `convert_fcn3.py` |
+| ERA5 input (GraphCast) and GraphCast 0.25° weights | 0.7 + 0.14 GB | `/cluster/work/projects/nn8106k/siyan/{graphcast_cache,windvis_weights/graphcast-operational}` | `graphcast_inference.py --fetch-only` |
 | IFS HRES analysis GRIB (Aurora input) and Aurora 0.1° weights | 6.5 + 4.9 GB | `/cluster/work/projects/nn8106k/siyan/{aurora01_cache,windvis_weights/aurora-0.1}` | `aurora01_inference.py --fetch-only` |
 
 The preprocessing scripts run on any machine after `pip install -r requirements.txt`
@@ -61,6 +65,8 @@ model/fcn3_inference.py        FCN3 forecast on a GPU node → data/forecast/fcn
 jobs/run_fcn3_senja.slurm      SLURM wrapper (accel partition, earth2studio env)
 model/aurora01_inference.py    Aurora 0.1°: fetch IFS HRES analysis (login node), run on a GPU node → data/forecast/aurora01_<init>.nc
 jobs/run_aurora01_senja.slurm  SLURM wrapper (GH200, earth2studio env + microsoft-aurora on PYTHONPATH)
+model/graphcast_inference.py   GraphCast 0.25°: fetch ERA5 from ARCO (login node), run with JAX on a GPU node → data/forecast/graphcast_<init>.nc
+jobs/run_graphcast_senja.slurm SLURM wrapper (GH200, earth2studio-graphcast env: jax[cuda13], dm-haiku, graphcast)
 preprocessing/common_schema.py common schema, zarr writer, web export, data index
 preprocessing/convert_fcn3.py  raw FCN3 crop → common schema (.zarr + web export)
 preprocessing/terrain.py       Kartverket NHM DTM (WCS) → Senja terrain grid
@@ -117,6 +123,11 @@ $PY model/aurora01_inference.py --fetch-only     # login node: GRIB + checkpoint
 pip install --no-deps --target /cluster/work/projects/nn8106k/siyan/pylib/aurora microsoft-aurora==2.0.1   # once
 sbatch jobs/run_aurora01_senja.slurm              # or: sbatch jobs/run_aurora01_senja.slurm 2024-01-31T06
 $PY preprocessing/convert_fcn3.py data/forecast/aurora01_20240131T06.nc --name Aurora --web-dir aurora01
+
+# 2c. GraphCast 0.25° (ERA5 from ARCO, anonymous; ≈1 min download, ≈2.5 min on one GH200)
+$PY model/graphcast_inference.py --fetch-only     # login node: ERA5 at t-6 h and t + weights
+sbatch jobs/run_graphcast_senja.slurm             # or: sbatch jobs/run_graphcast_senja.slurm 2024-01-31T06
+$PY preprocessing/convert_fcn3.py data/forecast/graphcast_20240131T06.nc --name GraphCast --web-dir graphcast025
 
 # 3. viewer
 module load NRIS/CPU; module load nodejs/20.13.1-GCCcore-13.3.0
