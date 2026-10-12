@@ -2,10 +2,10 @@
  "schema": "senja-common-wind-v1",
  "model": "OpenFOAM CFD",
  "init_time": "steady",
- "description": "Steady RANS (simpleFoam, k-\u03b5) over the Senja CFD box, case case_senja_D090_U12: neutral log-law inflow from 180\u00b0 (S) at 12 m/s at 10 m, solution at iteration 3000. Interpolated from 196,626 cells to levels 10, 50, 100, 200, 400, 800 m above ground; below the first cell centre (10% of points, mostly 10 m) log-law extrapolated with z0 = 0.1 m.",
+ "description": "Steady RANS (simpleFoam, k-\u03b5) over the Senja CFD box, case case_senja_D090_U12: neutral log-law inflow from 180\u00b0 (S) at 12 m/s at 10 m, solution at iteration 3000. Interpolated from 196,626 cells to flat levels at 50, 150, 300, 500, 700, 1000, 1500 m above sea level (cut by the terrain), and to 10 m above ground for the surface wind; below the first cell centre log-law extrapolated with z0 = 0.1 m.",
  "shape": [
   1,
-  6,
+  7,
   96,
   96
  ],
@@ -13,12 +13,13 @@
   0
  ],
  "levels": [
-  10,
   50,
-  100,
-  200,
-  400,
-  800
+  150,
+  300,
+  500,
+  700,
+  1000,
+  1500
  ],
  "lat": [
   69.55675247212507,
@@ -220,26 +221,26 @@
   "u": {
    "file": "u.bin",
    "units": "m s-1",
-   "min": -22.018051147460938,
-   "max": 23.16499137878418
+   "min": -22.617847442626953,
+   "max": 21.451690673828125
   },
   "v": {
    "file": "v.bin",
    "units": "m s-1",
-   "min": -20.61494255065918,
-   "max": 43.46626663208008
+   "min": -17.985877990722656,
+   "max": 44.61063766479492
   },
   "height": {
    "file": "height.bin",
    "units": "m",
-   "min": 10.0,
-   "max": 1501.6461181640625
+   "min": 50.0,
+   "max": 1500.0
   },
   "wind_speed": {
    "file": "wind_speed.bin",
    "units": "m s-1",
-   "min": 0.10574047267436981,
-   "max": 43.46913528442383
+   "min": 0.0,
+   "max": 44.623016357421875
   }
  },
  "surface": {
@@ -258,12 +259,14 @@
  },
  "native_deg": 0.0008983111749910168,
  "label": "CFD \u00b7 from S 12 m/s",
- "level_units": "m AGL",
+ "level_units": "m ASL",
  "terrain": "terrain-cfd-senja",
  "case": "case_senja_D090_U12",
  "inflow": {
   "from_deg": 180.0,
   "uref": 12.0,
-  "zref": 10.0
- }
+  "zref": 10.0,
+  "z0": 0.1
+ },
+ "group": "CFD cases \u00b7 CFD box"
 }

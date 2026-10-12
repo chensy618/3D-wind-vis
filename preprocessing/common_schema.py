@@ -180,6 +180,11 @@ def export_terrain_web(elev: np.ndarray, lat, lon, out_dir: str | Path, source: 
     return out / "manifest.json"
 
 
+# menu groups, in order; a manifest's "group" picks one, forecasts over the Senja domain by default
+GROUPS = ["Forecast · Senja 50 km", "Forecast, native resolution · CFD box", "WindINR × forecast · CFD box",
+          "CFD cases · CFD box", "Test"]
+
+
 def update_index(web_root: str | Path) -> Path:
     """Rebuild data/web/index.json listing every wind dataset and terrain."""
     root = Path(web_root)
@@ -190,13 +195,16 @@ def update_index(web_root: str | Path) -> Path:
         if "schema" in meta:
             init = meta.get("init_time", "")
             label = meta.get("label") or meta["model"] + (f" · {init.replace('T', ' ')}Z" if init[:2].isdigit() else "")
-            entry = {"id": entry_id, "label": label}
+            group = meta.get("group") or ("Test" if meta["model"] == "Synthetic" else GROUPS[0])
+            entry = {"id": entry_id, "label": label, "group": group}
             if meta.get("terrain"):  # the terrain this dataset's domain was built on (e.g. a CFD box)
                 entry["terrain"] = meta["terrain"]
             datasets.append(entry)
         elif meta.get("file") == "elevation.bin":
             terrains.append({"id": entry_id, "label": meta.get("label") or (
                 "Synthetic terrain" if meta["source"] == "synthetic" else "Senja DTM (Kartverket)")})
+    rank = {g: i for i, g in enumerate(GROUPS)}
+    datasets.sort(key=lambda d: (rank.get(d["group"], len(GROUPS)), d["label"]))
     index = {"datasets": datasets, "terrains": terrains}
     (root / "index.json").write_text(json.dumps(index, indent=1))
     return root / "index.json"

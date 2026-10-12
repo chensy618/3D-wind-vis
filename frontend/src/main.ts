@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import './style.css';
 import { niceMax } from './colormap';
-import { Domain } from './geo';
+import { CellBounds, Domain, nativeCellCount, nativeCells } from './geo';
 import { Annotations, ProbeMarker } from './scene/annotations';
 import { CameraRig, createCamera } from './scene/camera';
 import { Highlight } from './scene/highlight';
@@ -16,7 +16,7 @@ import { PointQuery } from './ui/query';
 import { Timeline } from './ui/timeline';
 import { AdvectionContext, ParticleSystem } from './wind/advection';
 import { timeWeights, TimeWeights } from './wind/interpolation';
-import { DataIndex, levelLabel, loadIndex, loadTerrain, loadWind, Terrain, terrainFor, WindField } from './wind/loader';
+import { DataIndex, datasetOptions, levelLabel, loadIndex, loadTerrain, loadWind, Terrain, terrainFor, WindField } from './wind/loader';
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
@@ -35,6 +35,8 @@ const state = {
 };
 
 interface Loaded {
+  /** the model grid cells when there are few enough for one particle each, else null */
+  cells: CellBounds[] | null;
   wind: WindField;
   terrain: Terrain;
   terrainId: string;
@@ -48,6 +50,8 @@ interface Loaded {
 }
 
 let data: Loaded | null = null;
+/** Grids with more cells than this use the Particles slider instead of one particle per cell. */
+const MAX_CELL_PARTICLES = 2000;
 let index: DataIndex | null = null;
 let rig: CameraRig | null = null;
 let probe: { x: number; y: number } | null = null;
@@ -187,7 +191,7 @@ function resetParticles(): void {
   if (!data) return;
   // Mode A: half the particle budget per chosen level, up to 1.5× the budget
   const n = state.mode === 'multi' ? state.nParticles : Math.round((state.nParticles / 2) * Math.min(state.levels.length, 3));
-  ps.reset(n, activeLevels(), advCtx());
+  ps.reset(n, activeLevels(), advCtx(), data.cells);
   const active = data.wind.levels.map((_, i) => activeLevels().includes(i));
   data.annotations.highlight(active);
 }
@@ -258,7 +262,17 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
     content.add(terrainMesh, ...surfaces.map((s) => s.mesh), annotations.group);
     scene.add(content);
 
+    // particles follow the model's resolution: one per grid cell (and level) when the grid is
+    // coarser than the particle budget, otherwise the Particles slider sets the count
+    const deg = wind.manifest.native_deg;
+    const cells = deg && nativeCellCount(domain, deg) <= MAX_CELL_PARTICLES ? nativeCells(domain, deg) : null;
+    const inp = $<HTMLInputElement>('#n-particles');
+    inp.disabled = cells != null;
+    $('#n-particles-out').textContent = cells
+      ? `1 per ${deg}° grid cell (${cells.length})`
+      : state.nParticles.toLocaleString('en');
     data = {
+      cells,
       wind,
       terrain,
       terrainId,
@@ -448,7 +462,7 @@ async function start(): Promise<void> {
   try {
     index = await loadIndex();
     if (!index.datasets.length) throw new Error('no datasets in data/index.json');
-    datasetSel.innerHTML = index.datasets.map((d) => `<option value="${d.id}">${d.label}</option>`).join('');
+    datasetSel.innerHTML = datasetOptions(index.datasets);
     terrainSel.innerHTML = index.terrains.map((d) => `<option value="${d.id}">${d.label}</option>`).join('');
     const q = new URLSearchParams(location.search);
     const pick = (list: { id: string }[], want: string | null, prefer: string) =>

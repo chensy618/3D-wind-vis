@@ -1,4 +1,4 @@
-import { Domain } from '../geo';
+import { CellBounds, Domain } from '../geo';
 import { TimeWeights } from './interpolation';
 import { Terrain, WindField } from './loader';
 
@@ -33,11 +33,21 @@ export class ParticleSystem {
   age = new Float32Array(0);
   maxAge = new Float32Array(0);
   alive = new Uint8Array(0);
+  /** Model grid cells: when set, particle i belongs to cell[i] and always respawns inside it. */
+  cells: CellBounds[] | null = null;
+  cell = new Int32Array(0);
   /** History in scene coords: trail[(p * TRAIL + k) * 3], k = 0 is the newest. */
   trail = new Float32Array(0);
 
-  reset(n: number, levels: number[], ctx: AdvectionContext): void {
+  /**
+   * `n` particles spread over the domain, or, with `cells`, one particle per cell and level
+   * (a coarse model shows as few particles as it has grid points).
+   */
+  reset(n: number, levels: number[], ctx: AdvectionContext, cells: CellBounds[] | null = null): void {
+    this.cells = cells;
+    if (cells) n = cells.length * levels.length;
     this.n = n;
+    this.cell = new Int32Array(n);
     this.x = new Float32Array(n);
     this.y = new Float32Array(n);
     this.heightM = new Float32Array(n);
@@ -49,6 +59,7 @@ export class ParticleSystem {
     this.trail = new Float32Array(n * TRAIL * 3);
     for (let i = 0; i < n; i++) {
       this.level[i] = levels[i % levels.length];
+      this.cell[i] = Math.floor(i / levels.length);
       this.respawn(i, ctx);
       this.age[i] = Math.random() * this.maxAge[i]; // desynchronise lifetimes
     }
@@ -67,9 +78,10 @@ export class ParticleSystem {
     const { domain } = ctx;
     this.age[i] = 0;
     this.maxAge[i] = 2 + Math.random() * 4; // seconds
+    const c = this.cells?.[this.cell[i]];
     for (let tries = 0; tries < 30; tries++) {
-      const x = Math.random() * domain.width;
-      const y = Math.random() * domain.depth;
+      const x = c ? c.x0 + Math.random() * (c.x1 - c.x0) : Math.random() * domain.width;
+      const y = c ? c.y0 + Math.random() * (c.y1 - c.y0) : Math.random() * domain.depth;
       const h = this.validHeight(i, x, y, ctx);
       if (!Number.isNaN(h)) {
         this.x[i] = x;

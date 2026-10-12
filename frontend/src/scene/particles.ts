@@ -14,39 +14,56 @@ export interface ParticleTrails {
   alive: Uint8Array;
 }
 
-/** Fading streak lines + bright heads, colored by wind speed unless `color` is given. */
+/**
+ * Fading streak lines + bright heads, colored by wind speed unless `color` is given. With
+ * `arrows`, each particle is instead a "--->" arrow (shaft and two barbs, in the horizontal
+ * plane) pointing along its motion, and the streak lines are hidden.
+ */
 export class ParticleRenderer {
   readonly group = new THREE.Group();
   private lines: THREE.LineSegments;
-  private heads: THREE.Points;
+  private heads: THREE.Points | THREE.LineSegments;
+  /** vertices per head: 1 (point) or 6 (arrow: shaft + two barbs) */
+  private hv: number;
   private capacity = 0;
   private segs = 0;
   private rgb = new Float32Array(3);
+  /** arrow length, scene km */
+  private arrow = 0.3;
+  /** last horizontal direction per particle, kept while it does not move */
+  private dir = new Float32Array(0);
 
-  constructor() {
+  constructor(private readonly arrows = false) {
     this.lines = new THREE.LineSegments(
       new THREE.BufferGeometry(),
       new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }),
     );
-    this.heads = new THREE.Points(
-      new THREE.BufferGeometry(),
-      new THREE.PointsMaterial({
-        size: 2.5,
-        sizeAttenuation: false,
-        vertexColors: true,
-        transparent: true,
-        depthWrite: false,
-      }),
-    );
+    this.hv = arrows ? 6 : 1;
+    this.lines.visible = !arrows;
+    this.heads = arrows
+      ? new THREE.LineSegments(
+          new THREE.BufferGeometry(),
+          new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }),
+        )
+      : new THREE.Points(
+          new THREE.BufferGeometry(),
+          new THREE.PointsMaterial({
+            size: 2.5,
+            sizeAttenuation: false,
+            vertexColors: true,
+            transparent: true,
+            depthWrite: false,
+          }),
+        );
     this.lines.frustumCulled = false;
     this.heads.frustumCulled = false;
     this.group.add(this.lines, this.heads);
     this.group.name = 'particles';
   }
 
-  /** Head size in pixels. */
-  setHeadSize(px: number): void {
-    (this.heads.material as THREE.PointsMaterial).size = px;
+  /** Arrow length in scene km (horizontal, so not stretched by the vertical exaggeration). */
+  setArrowSize(km: number): void {
+    this.arrow = km;
   }
 
   private ensure(n: number, segs: number): void {
@@ -57,8 +74,9 @@ export class ParticleRenderer {
     lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * segs * 2 * 3), 3));
     lg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * segs * 2 * 4), 4));
     const hg = this.heads.geometry;
-    hg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
-    hg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 4), 4));
+    hg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * this.hv * 3), 3));
+    hg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * this.hv * 4), 4));
+    this.dir = new Float32Array(n * 2);
   }
 
   update(ps: ParticleTrails, maxSpeed: number, color?: (i: number, out: Float32Array) => void): void {
@@ -85,13 +103,17 @@ export class ParticleRenderer {
       const life = ps.age[i] / ps.maxAge[i];
       const fade = ps.alive[i] ? Math.min(1, ps.age[i] * 3, (1 - life) * 4) : 0;
 
-      hp[i * 3] = tr[base];
-      hp[i * 3 + 1] = tr[base + 1];
-      hp[i * 3 + 2] = tr[base + 2];
-      hc[i * 4] = rgb[0];
-      hc[i * 4 + 1] = rgb[1];
-      hc[i * 4 + 2] = rgb[2];
-      hc[i * 4 + 3] = fade;
+      if (this.arrows) {
+        this.arrowHead(i, tr, base, rgb, fade, hp, hc);
+      } else {
+        hp[i * 3] = tr[base];
+        hp[i * 3 + 1] = tr[base + 1];
+        hp[i * 3 + 2] = tr[base + 2];
+        hc[i * 4] = rgb[0];
+        hc[i * 4 + 1] = rgb[1];
+        hc[i * 4 + 2] = rgb[2];
+        hc[i * 4 + 3] = fade;
+      }
 
       for (let s = 0; s < SEGS; s++) {
         const v = (i * SEGS + s) * 2;
@@ -117,6 +139,44 @@ export class ParticleRenderer {
     hpos.needsUpdate = true;
     hcol.needsUpdate = true;
     this.lines.geometry.setDrawRange(0, n * SEGS * 2);
-    this.heads.geometry.setDrawRange(0, n);
+    this.heads.geometry.setDrawRange(0, n * this.hv);
+  }
+
+  /** "--->" with its tip at the head, pointing from the previous position (scene x, z plane). */
+  private arrowHead(i: number, tr: Float32Array, base: number, rgb: Float32Array, fade: number, hp: Float32Array, hc: Float32Array): void {
+    const ddx = tr[base] - tr[base + 3];
+    const ddz = tr[base + 2] - tr[base + 5];
+    const dl = Math.hypot(ddx, ddz);
+    if (dl > 1e-9) {
+      this.dir[i * 2] = ddx / dl;
+      this.dir[i * 2 + 1] = ddz / dl;
+    }
+    const dx = this.dir[i * 2];
+    const dz = this.dir[i * 2 + 1];
+    const L = this.arrow;
+    const B = 0.3 * L; // barb length
+    const tx = tr[base];
+    const y = tr[base + 1];
+    const tz = tr[base + 2];
+    // barbs at +-30 degrees from the reversed direction
+    const c30 = 0.866 * B;
+    const s30 = 0.5 * B;
+    const pts = [
+      tx - dx * L, tz - dz * L, tx, tz, // shaft
+      tx, tz, tx - dx * c30 - dz * s30, tz - dz * c30 + dx * s30, // barb
+      tx, tz, tx - dx * c30 + dz * s30, tz - dz * c30 - dx * s30, // barb
+    ];
+    const alpha = dx === 0 && dz === 0 ? 0 : fade; // no direction yet
+    for (let k = 0; k < 6; k++) {
+      const p = (i * 6 + k) * 3;
+      hp[p] = pts[k * 2];
+      hp[p + 1] = y;
+      hp[p + 2] = pts[k * 2 + 1];
+      const c = (i * 6 + k) * 4;
+      hc[c] = rgb[0];
+      hc[c + 1] = rgb[1];
+      hc[c + 2] = rgb[2];
+      hc[c + 3] = alpha;
+    }
   }
 }

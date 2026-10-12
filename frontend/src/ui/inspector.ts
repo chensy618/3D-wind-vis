@@ -86,7 +86,7 @@ export class Inspector {
       ${sel ? `<h3>${sel.level} ${p.levelUnit}</h3>${head}` : ''}
       <h3>Vertical profile</h3>
       <table class="profile">
-        <thead><tr><th>${p.levelUnit === 'hPa' ? 'hPa' : 'AGL (m)'}</th><th>z (m)</th><th>m/s</th><th>dir</th></tr></thead>
+        <thead><tr><th>${p.levelUnit}</th><th>z (m)</th><th>m/s</th><th>dir</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <p class="note">Grey rows: level lies below the terrain here.</p>`;

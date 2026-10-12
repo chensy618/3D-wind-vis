@@ -19,13 +19,13 @@ export interface WindManifest {
   surface?: Record<string, { file: string; units: string; min: number; max: number }>;
   /** Display name for menus (falls back to model + init time). */
   label?: string;
-  /** Unit of `levels`: pressure (default, 'hPa') or height above ground ('m AGL', CFD). */
+  /** Unit of `levels`: pressure (default, 'hPa') or altitude ('m ASL', CFD). */
   level_units?: string;
   /** Terrain id this dataset's domain was built on (e.g. a CFD box); the viewers switch to it. */
   terrain?: string;
 }
 
-/** "850 hPa" or "100 m AGL". */
+/** "850 hPa" or "300 m ASL". */
 export function levelLabel(m: WindManifest, level: number): string {
   return `${level} ${m.level_units ?? 'hPa'}`;
 }
@@ -45,6 +45,23 @@ export interface DatasetEntry {
   label: string;
   /** Terrain this dataset requires (see WindManifest.terrain). */
   terrain?: string;
+  /** Menu group (index order is group order). */
+  group?: string;
+}
+
+/** <option>s for a dataset menu, in <optgroup>s when the entries have groups. */
+export function datasetOptions(entries: { id: string; label: string; group?: string }[]): string {
+  let html = '';
+  let open: string | undefined;
+  for (const d of entries) {
+    if (d.group !== open) {
+      if (open !== undefined) html += '</optgroup>';
+      open = d.group;
+      if (open !== undefined) html += `<optgroup label="${open}">`;
+    }
+    html += `<option value="${d.id}">${d.label}</option>`;
+  }
+  return open !== undefined ? `${html}</optgroup>` : html;
 }
 
 /**

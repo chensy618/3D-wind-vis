@@ -42,7 +42,7 @@ Included in `data/web/` (about 17 MB, everything the viewer loads):
 - Senja terrain: Kartverket DTM resampled to 256 × 256
 - Synthetic wind field (with a 10 m wind) and synthetic terrain, for testing the frontend
 - OpenFOAM CFD over a 6 × 6 km box around Segla/Ersfjord (nine steady cases: from SW at 8, 12 and 16 m/s, and from W, NW, N, NE, E and S at 12 m/s),
-  on six levels from 10 to 800 m above ground, with its own 10 m DEM terrain (see [CFD datasets](#cfd-datasets))
+  on seven flat levels from 50 to 1500 m above sea level plus the 10 m wind, with its own 10 m DEM terrain (see [CFD datasets](#cfd-datasets))
 
 Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the scripts):
 
@@ -74,7 +74,9 @@ model/graphcast_inference.py   GraphCast 0.25°: fetch ERA5 from ARCO (login nod
 jobs/run_graphcast_senja.slurm SLURM wrapper (GH200, earth2studio-graphcast env: jax[cuda13], dm-haiku, graphcast)
 preprocessing/common_schema.py common schema, zarr writer, web export, data index
 preprocessing/convert_fcn3.py  raw FCN3 crop → common schema (.zarr + web export)
-preprocessing/convert_openfoam.py  steady OpenFOAM cases → terrain-following levels + CFD-box terrain (web export)
+preprocessing/convert_openfoam.py  steady OpenFOAM cases → flat ASL levels + CFD-box terrain (web export)
+preprocessing/convert_windinr.py   forecast background → WindINR inputs; WindINR prediction → web export
+model/windinr_inference.py     WindINR background-mode inference (jobs/run_windinr_inference.sh: LUMI container)
 preprocessing/make_synthetic.py Phase 0 synthetic wind + synthetic terrain
 preprocessing/terrain.py       Kartverket NHM DTM (WCS) → Senja terrain grid
 data/terrain/                  source DTM GeoTIFF (25 m, EPSG:25833), kept for later high-res work
@@ -112,7 +114,7 @@ Optional manifest fields, used by the CFD datasets:
 | field         | meaning |
 |---------------|---------|
 | `label`       | menu name (default: model + init time) |
-| `level_units` | unit of `levels`: `hPa` (default) or `m AGL`; `height` is then ground + level |
+| `level_units` | unit of `levels`: `hPa` (default) or `m ASL`, flat altitude levels with `height` = level |
 | `terrain`     | id of the terrain the dataset's domain was built on. Both viewers switch to it, and back to the default terrain when another dataset is chosen |
 
 ## CFD datasets
@@ -123,11 +125,14 @@ project, on a ~197 k-cell terrain-following mesh over a 6 × 6 km box at Segla/E
 10 m), not a forecast: the dataset has a single frame, and the viewers hide the timeline.
 
 `convert_openfoam.py` interpolates the cell-centre velocity (linear on a Delaunay
-triangulation in x, y and height above ground) to 96 × 96 points at 10, 50, 100, 200, 400 and
-800 m above ground, rotates u/v from UTM grid north to true north (~2° here), and trims 250 m
-off each side of the box, where terrain meets the inflow/outflow boundaries. The 10 m level
-is also exported as `u10`/`v10`, so the surface page can show it. Terrain adjustment is
-switched off there for CFD, since the CFD already resolves the terrain.
+triangulation in x, y and height above ground) to 96 × 96 points on flat levels at 50, 150,
+300, 500, 700, 1000 and 1500 m above sea level. The mountains (up to ~800 m) cut through the
+lower levels: the wind is 0 inside the terrain, and the viewer hides those parts of a level
+and lets no particles in. It also samples 10 m above ground as `u10`/`v10` for the surface
+page, where terrain adjustment is switched off for CFD, since the CFD already resolves the
+terrain. Below the first cell centre (17 m over the sea) the wind is extrapolated with the
+log law (z0 of the case). u/v are rotated from UTM grid north to true north (~2° here), and
+250 m is trimmed off each side of the box, where terrain meets the inflow/outflow boundaries.
 
 ```bash
 # cell centres, once per mesh (OpenFOAM v2412 on LUMI: module use /appl/local/csc/modulefiles; module load openfoam/v2412)
@@ -141,6 +146,32 @@ python preprocessing/convert_openfoam.py --centres /tmp/cc/0/C \
 
 Case names give the flow direction as a math angle the flow goes *toward* (`D225` = toward
 the SW = from the NE); the 45° cases are named `case_senja_U<speed>` without a `D`.
+
+### WindINR × forecast (a unified, time-varying field)
+
+The CFD cases are idealised, one inflow direction each. `convert_windinr.py` turns a forecast
+into one high-resolution field per lead time with WindINR (`../windinr`, checkpoint
+`senja_v1/v3`, trained on 65 of these cases): the forecast's mean wind between the ground and
+500 m on a 7 × 7 (~1 km) grid over the CFD box is the background, and WindINR predicts the
+wind on the CFD box grid at 50, 150, 300 and 500 m above sea level (its height range ends at
+500 m) and 10 m above ground. Below 25 m above ground the training data are too slow (the
+extraction interpolated the wall's zero velocity), so the wind there is taken at 25 m and
+extrapolated with the log law. Datasets `windinr-aurora01`, `windinr-fcn3` and
+`windinr-graphcast025` (2024-01-31 06Z, T+0 to T+24 h) share the CFD box terrain.
+
+```bash
+PY=../wind_sim/.venv/bin/python
+$PY preprocessing/convert_windinr.py prep --driver aurora01      # background + query points
+jobs/run_windinr_inference.sh aurora01                           # LUMI PyTorch container, CPU, ~1 min
+$PY preprocessing/convert_windinr.py export --driver aurora01
+$PY preprocessing/convert_windinr.py native --driver aurora01      # the forecast itself on the CFD box
+```
+
+For comparison, `native` puts the driving forecast on the same CFD box grid and levels at its
+own resolution (each point takes its nearest model grid point: one 0.25° point covers the
+whole box for FCN3/GraphCast, two 0.1° points for Aurora). The menus group the datasets:
+forecasts over the Senja domain, the forecasts at native resolution on the CFD box, WindINR ×
+forecast, and the CFD cases (manifest `group`).
 
 ## Running
 

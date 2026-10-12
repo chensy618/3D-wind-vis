@@ -95,3 +95,42 @@ export class Domain {
     return { x: p.x + this.width / 2, y: this.depth / 2 - p.z };
   }
 }
+
+/** A model grid cell clipped to the domain, in local km. */
+export interface CellBounds {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+/**
+ * Cells of a regular `deg` lat/lon model grid (centred on multiples of `deg`) that overlap the
+ * domain, clipped to it; a cell that only touches the edge is left out.
+ */
+export function nativeCells(domain: Domain, deg: number): CellBounds[] {
+  const half = deg / 2;
+  const eps = 1e-6 * deg;
+  const axis = (lo: number, hi: number) => {
+    const out: number[] = [];
+    for (let c = Math.ceil((lo - half) / deg) * deg; c - half < hi - eps; c += deg) if (c + half > lo + eps) out.push(c);
+    return out;
+  };
+  const cells: CellBounds[] = [];
+  for (const lat of axis(domain.latMin, domain.latMax)) {
+    for (const lon of axis(domain.lonMin, domain.lonMax)) {
+      cells.push({
+        x0: Math.max(0, domain.localX(lon - half)),
+        x1: Math.min(domain.width, domain.localX(lon + half)),
+        y0: Math.max(0, domain.localY(lat - half)),
+        y1: Math.min(domain.depth, domain.localY(lat + half)),
+      });
+    }
+  }
+  return cells;
+}
+
+/** Number of `deg` cells over the domain, without building them. */
+export function nativeCellCount(domain: Domain, deg: number): number {
+  return (Math.ceil((domain.latMax - domain.latMin) / deg) + 1) * (Math.ceil((domain.lonMax - domain.lonMin) / deg) + 1);
+}

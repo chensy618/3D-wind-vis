@@ -2,64 +2,113 @@
  "datasets": [
   {
    "id": "aurora01",
-   "label": "Aurora \u00b7 2024-01-31 06Z"
+   "label": "Aurora \u00b7 2024-01-31 06Z",
+   "group": "Forecast \u00b7 Senja 50 km"
+  },
+  {
+   "id": "fcn3",
+   "label": "FCN3 \u00b7 2024-01-31 06Z",
+   "group": "Forecast \u00b7 Senja 50 km"
+  },
+  {
+   "id": "graphcast025",
+   "label": "GraphCast \u00b7 2024-01-31 06Z",
+   "group": "Forecast \u00b7 Senja 50 km"
+  },
+  {
+   "id": "aurora01-cfdbox",
+   "label": "Aurora 0.1\u00b0 native \u00b7 2024-01-31 06Z",
+   "group": "Forecast, native resolution \u00b7 CFD box",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "fcn3-cfdbox",
+   "label": "FCN3 0.25\u00b0 native \u00b7 2024-01-31 06Z",
+   "group": "Forecast, native resolution \u00b7 CFD box",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "graphcast025-cfdbox",
+   "label": "GraphCast 0.25\u00b0 native \u00b7 2024-01-31 06Z",
+   "group": "Forecast, native resolution \u00b7 CFD box",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "windinr-aurora01",
+   "label": "WindINR \u00d7 Aurora \u00b7 2024-01-31 06Z",
+   "group": "WindINR \u00d7 forecast \u00b7 CFD box",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "windinr-fcn3",
+   "label": "WindINR \u00d7 FCN3 \u00b7 2024-01-31 06Z",
+   "group": "WindINR \u00d7 forecast \u00b7 CFD box",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "windinr-graphcast025",
+   "label": "WindINR \u00d7 GraphCast \u00b7 2024-01-31 06Z",
+   "group": "WindINR \u00d7 forecast \u00b7 CFD box",
+   "terrain": "terrain-cfd-senja"
   },
   {
    "id": "cfd-senja-e-u12",
    "label": "CFD \u00b7 from E 12 m/s",
+   "group": "CFD cases \u00b7 CFD box",
    "terrain": "terrain-cfd-senja"
   },
   {
    "id": "cfd-senja-n-u12",
    "label": "CFD \u00b7 from N 12 m/s",
+   "group": "CFD cases \u00b7 CFD box",
    "terrain": "terrain-cfd-senja"
   },
   {
    "id": "cfd-senja-ne-u12",
    "label": "CFD \u00b7 from NE 12 m/s",
+   "group": "CFD cases \u00b7 CFD box",
    "terrain": "terrain-cfd-senja"
   },
   {
    "id": "cfd-senja-nw-u12",
    "label": "CFD \u00b7 from NW 12 m/s",
+   "group": "CFD cases \u00b7 CFD box",
    "terrain": "terrain-cfd-senja"
   },
   {
    "id": "cfd-senja-s-u12",
    "label": "CFD \u00b7 from S 12 m/s",
-   "terrain": "terrain-cfd-senja"
-  },
-  {
-   "id": "cfd-senja-sw-u08",
-   "label": "CFD \u00b7 from SW 8 m/s",
+   "group": "CFD cases \u00b7 CFD box",
    "terrain": "terrain-cfd-senja"
   },
   {
    "id": "cfd-senja-sw-u12",
    "label": "CFD \u00b7 from SW 12 m/s",
+   "group": "CFD cases \u00b7 CFD box",
    "terrain": "terrain-cfd-senja"
   },
   {
    "id": "cfd-senja-sw-u16",
    "label": "CFD \u00b7 from SW 16 m/s",
+   "group": "CFD cases \u00b7 CFD box",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "cfd-senja-sw-u08",
+   "label": "CFD \u00b7 from SW 8 m/s",
+   "group": "CFD cases \u00b7 CFD box",
    "terrain": "terrain-cfd-senja"
   },
   {
    "id": "cfd-senja-w-u12",
    "label": "CFD \u00b7 from W 12 m/s",
+   "group": "CFD cases \u00b7 CFD box",
    "terrain": "terrain-cfd-senja"
   },
   {
-   "id": "fcn3",
-   "label": "FCN3 \u00b7 2024-01-31 06Z"
-  },
-  {
-   "id": "graphcast025",
-   "label": "GraphCast \u00b7 2024-01-31 06Z"
-  },
-  {
    "id": "synthetic",
-   "label": "Synthetic"
+   "label": "Synthetic",
+   "group": "Test"
   }
  ],
  "terrains": [

@@ -11,7 +11,7 @@ import { windFrom } from '../ui/inspector';
 import { renderScale, ScaleSpec } from '../ui/legend';
 import { PointQuery } from '../ui/query';
 import { timeWeights } from '../wind/interpolation';
-import { DataIndex, loadIndex, loadTerrain, loadWind, loadWindManifest, Terrain, terrainFor, WindField } from '../wind/loader';
+import { DataIndex, datasetOptions, loadIndex, loadTerrain, loadWind, loadWindManifest, Terrain, terrainFor, WindField } from '../wind/loader';
 import { SurfaceParams, SurfaceWindModel } from './model';
 import { ArrowField, ArrowPoint, GridKind, GridOverlay, TenMetreMarker } from './overlays';
 import { Cell, nearest, SurfaceParticles, WindLayer } from './particles';
@@ -50,6 +50,7 @@ interface ModelEntry {
   deg: number;
   /** its own terrain (a CFD box), which already shapes the wind */
   terrain?: string;
+  group?: string;
 }
 /** The selected model's forecast and its clock. */
 let index: DataIndex | null = null;
@@ -108,7 +109,7 @@ const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
 sun.position.set(-40, 25, 30);
 scene.add(sun);
 
-const particles = new ParticleRenderer();
+const particles = new ParticleRenderer(true); // "--->" arrows
 const ps = new SurfaceParticles();
 const grid = new GridOverlay();
 const arrows = new ArrowField();
@@ -127,25 +128,63 @@ function niceScale(v: number): number {
   return Math.ceil(v / 5) * 5;
 }
 
+/** At most this many particles: finer grids get one particle per block of cells. */
+const MAX_PARTICLES = 1500;
+const thinned = new WeakMap<Cell[], Cell[]>();
+
+/**
+ * The grid's cells, or, when there are more than MAX_PARTICLES, blocks of neighbouring cells
+ * (one particle each). Particles still move with the wind of the nearest grid point.
+ */
+function particleCells(cells: Cell[], domain: Domain): Cell[] {
+  if (cells.length <= MAX_PARTICLES) return cells;
+  let out = thinned.get(cells);
+  if (out) return out;
+  const s = Math.sqrt((domain.width * domain.depth) / MAX_PARTICLES); // block size, km
+  const nbx = Math.max(1, Math.round(domain.width / s));
+  const nby = Math.max(1, Math.round(domain.depth / s));
+  const blocks = new Map<number, Cell>();
+  for (const c of cells) {
+    const bi = Math.min(nbx - 1, Math.floor((((c.x0 + c.x1) / 2) / domain.width) * nbx));
+    const bj = Math.min(nby - 1, Math.floor((((c.y0 + c.y1) / 2) / domain.depth) * nby));
+    const b = blocks.get(bj * nbx + bi);
+    if (b) {
+      b.x0 = Math.min(b.x0, c.x0);
+      b.x1 = Math.max(b.x1, c.x1);
+      b.y0 = Math.min(b.y0, c.y0);
+      b.y1 = Math.max(b.y1, c.y1);
+    } else {
+      blocks.set(bj * nbx + bi, { x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1 });
+    }
+  }
+  out = [...blocks.values()];
+  thinned.set(cells, out);
+  return out;
+}
+
 function ctx() {
   const d = data!;
   const coarse = view.grid === 'native';
   return {
     wind: shown!,
-    cells: coarse ? d.nativeCells : d.gridCells,
+    cells: particleCells(coarse ? d.nativeCells : d.gridCells, d.domain),
     terrain: d.terrain,
     domain: d.domain,
     speedFactor: view.speedFactor,
     exaggeration: view.exaggeration,
-    // few particles get long trails; one per 200 m cell gets short ones
-    trailLen: coarse ? 40 : 3,
+    // few particles get long trails, many get short ones
+    trailLen: particleCells(coarse ? d.nativeCells : d.gridCells, d.domain).length <= 200 ? 40 : 6,
   };
 }
 
 function resetParticles(): void {
   if (!data || !shown) return;
-  particles.setHeadSize(view.grid === 'native' ? 9 : 2);
-  ps.reset(ctx());
+  const c = ctx();
+  // arrows 0.6 of the particle spacing, within readable bounds for the domain
+  const spacing = Math.sqrt((data.domain.width * data.domain.depth) / c.cells.length);
+  const size = Math.max(data.domain.width, data.domain.depth);
+  particles.setArrowSize(Math.min(Math.max(0.6 * spacing, size / 120), size / 20));
+  ps.reset(c);
 }
 
 function buildGrid(): void {
@@ -161,13 +200,15 @@ function updateGridInfo(): void {
   const m = source.model;
   // full cell size: the largest extent in each direction (edge cells are clipped by the domain)
   const fmt = (km: number) => (km < 10 ? km.toFixed(1) : Math.round(km).toString());
-  const w = Math.max(...data.nativeCells.map((c) => c.x1 - c.x0));
-  const h = Math.max(...data.nativeCells.map((c) => c.y1 - c.y0));
+  const { w, h } = largestCell(data.nativeCells);
   $('#grid-native').textContent = `${m.name} (${m.deg}°)`;
   $('#grid-terrain').textContent = `Terrain (${Math.round((data.model.dx * 1000) / 50) * 50} m)`;
   const n = view.grid === 'native' ? data.nativeCells.length : data.gridCells.length;
   const size = view.grid === 'native' ? `~${fmt(w)} × ${fmt(h)} km` : `${Math.round(data.model.dx * 1000)} m`;
-  $('#grid-info').textContent = `${n.toLocaleString('en')} cells of ${size}: one particle each`;
+  const np = particleCells(view.grid === 'native' ? data.nativeCells : data.gridCells, data.domain).length;
+  $('#grid-info').textContent = np === n
+    ? `${n.toLocaleString('en')} cells of ${size}: one particle each`
+    : `${n.toLocaleString('en')} cells of ${size}: ${np.toLocaleString('en')} particles, one per block of cells`;
 }
 
 function buildArrows(): void {
@@ -181,8 +222,7 @@ function buildArrows(): void {
     // one arrow per model grid point
     points = nativeCells.map((c) => ({ x: c.x, y: c.y, u: nearest(s.u, s, c.x, c.y), v: nearest(s.v, s, c.x, c.y) }));
     // a full cell's size (edge cells are clipped by the domain)
-    const w = Math.max(...nativeCells.map((c) => c.x1 - c.x0));
-    const h = Math.max(...nativeCells.map((c) => c.y1 - c.y0));
+    const { w, h } = largestCell(nativeCells);
     spacing = 0.8 * Math.min(w, h);
   } else {
     const stride = Math.max(1, Math.round(1.6 / Math.min(model.dx, model.dy))); // ~1.6 km apart
@@ -227,6 +267,17 @@ function setSeg(root: HTMLElement, attr: string, value: string): void {
 }
 
 /** The wind model's grid cells (centred on multiples of `deg`) clipped to the domain. */
+/** Largest cell width and height (km); a loop, since spreading a large grid overflows the stack. */
+function largestCell(cells: NativeCell[]): { w: number; h: number } {
+  let w = 0;
+  let h = 0;
+  for (const c of cells) {
+    w = Math.max(w, c.x1 - c.x0);
+    h = Math.max(h, c.y1 - c.y0);
+  }
+  return { w, h };
+}
+
 function buildNativeCells(domain: Domain, model: SurfaceWindModel, deg: number): { cells: NativeCell[]; cellOf: Int32Array } {
   const half = deg / 2;
   const lats: number[] = [];
@@ -733,12 +784,10 @@ async function start(): Promise<void> {
       const m = manifests[i];
       if (!m?.surface?.u10) return [];
       const deg = m.native_deg ?? 0.25;
-      return [{ id: d.id, name: m.model, label: m.label ?? `${m.model} ${deg}°`, deg, terrain: m.terrain }];
+      return [{ id: d.id, name: m.model, label: m.label ?? `${m.model} ${deg}°`, deg, terrain: m.terrain, group: d.group }];
     });
     if (!source.models.length) throw new Error('no dataset with a 10 m wind field; run FCN3 and convert_fcn3.py (see README)');
-    modelSel.innerHTML = source.models
-      .map((m) => `<option value="${m.id}">${m.label}</option>`)
-      .join('');
+    modelSel.innerHTML = datasetOptions(source.models);
     await setModel(source.models[0].id, false);
     terrainSel.innerHTML = index.terrains.map((d) => `<option value="${d.id}">${d.label}</option>`).join('');
     const q = new URLSearchParams(location.search);
