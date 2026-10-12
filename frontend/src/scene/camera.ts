@@ -6,6 +6,8 @@ export interface CameraRig {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   reset(): void;
+  /** Re-frame for a domain of another size (e.g. a small CFD box) and reset the view. */
+  setDomain(domain: Domain): void;
   resize(width: number, height: number): void;
   /** Pan so that `point` becomes the orbit centre, keeping the view angle and distance. */
   focus(point: THREE.Vector3): void;
@@ -23,17 +25,22 @@ export function createCamera(dom: HTMLElement, domain: Domain): CameraRig {
   controls.dampingFactor = 0.08;
   controls.screenSpacePanning = true;
   controls.maxPolarAngle = Math.PI * 0.495; // stay above the ground plane
-  controls.minDistance = 3;
   controls.maxDistance = 400;
 
-  const size = Math.max(domain.width, domain.depth);
+  let size = 0;
   const reset = () => {
     // looking from the south-west over the ocean towards the Senja mountains
     // (target shifted west so the domain sits right of the control panel)
     camera.position.set(-0.85 * size, 0.55 * size, 0.95 * size);
-    controls.target.set(-0.1 * size, 3, 0);
+    controls.target.set(-0.1 * size, 0.06 * size, 0);
     controls.update();
   };
+  const setDomain = (d: Domain) => {
+    size = Math.max(d.width, d.depth);
+    controls.minDistance = Math.min(3, 0.1 * size);
+    reset();
+  };
+  setDomain(domain);
   reset();
 
   // a pan moves the camera and its target by the same offset, eased in and out
@@ -46,6 +53,10 @@ export function createCamera(dom: HTMLElement, domain: Domain): CameraRig {
     reset() {
       pan = null;
       reset();
+    },
+    setDomain(d: Domain) {
+      pan = null;
+      setDomain(d);
     },
     focus(point: THREE.Vector3) {
       pan = { from: controls.target.clone(), by: point.clone().sub(controls.target), t: 0 };

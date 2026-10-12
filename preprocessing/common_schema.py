@@ -189,11 +189,14 @@ def update_index(web_root: str | Path) -> Path:
         entry_id = m.parent.name
         if "schema" in meta:
             init = meta.get("init_time", "")
-            label = meta["model"] + (f" · {init.replace('T', ' ')}Z" if init[:2].isdigit() else "")
-            datasets.append({"id": entry_id, "label": label})
+            label = meta.get("label") or meta["model"] + (f" · {init.replace('T', ' ')}Z" if init[:2].isdigit() else "")
+            entry = {"id": entry_id, "label": label}
+            if meta.get("terrain"):  # the terrain this dataset's domain was built on (e.g. a CFD box)
+                entry["terrain"] = meta["terrain"]
+            datasets.append(entry)
         elif meta.get("file") == "elevation.bin":
-            terrains.append({"id": entry_id, "label": "Synthetic terrain" if meta["source"] == "synthetic"
-                             else "Senja DTM (Kartverket)"})
+            terrains.append({"id": entry_id, "label": meta.get("label") or (
+                "Synthetic terrain" if meta["source"] == "synthetic" else "Senja DTM (Kartverket)")})
     index = {"datasets": datasets, "terrains": terrains}
     (root / "index.json").write_text(json.dumps(index, indent=1))
     return root / "index.json"

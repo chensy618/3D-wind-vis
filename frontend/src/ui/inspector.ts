@@ -1,7 +1,7 @@
 import { colormapCss } from '../colormap';
 
 export interface ProbeRow {
-  level: number; // hPa
+  level: number; // in ProbeInfo.levelUnit
   height: number; // m
   u: number;
   v: number;
@@ -15,6 +15,9 @@ export interface ProbeInfo {
   terrain: number;
   model: string;
   lead: number;
+  /** a steady CFD solution rather than a forecast: no lead time */
+  steady: boolean;
+  levelUnit: string; // 'hPa' or 'm AGL'
   selectedLevels: number[]; // indices into rows; empty in all-levels mode
   rows: ProbeRow[];
   maxSpeed: number;
@@ -57,7 +60,7 @@ export class Inspector {
       : '';
     const rows = [...p.rows]
       .map((r, i) => ({ r, i }))
-      .sort((a, b) => a.r.level - b.r.level)
+      .sort((a, b) => b.r.height - a.r.height)
       .map(
         ({ r, i }) => `
         <tr class="${p.selectedLevels.includes(i) ? 'sel' : ''} ${r.belowGround ? 'below' : ''}">
@@ -78,12 +81,12 @@ export class Inspector {
         <dt>Longitude</dt><dd>${p.lon.toFixed(3)}° E</dd>
         <dt>Terrain</dt><dd>${Math.round(p.terrain)} m</dd>
         <dt>Model</dt><dd>${p.model}</dd>
-        <dt>Lead time</dt><dd>+${f1(p.lead).replace(/\.0$/, '')} h</dd>
+        ${p.steady ? '' : `<dt>Lead time</dt><dd>+${f1(p.lead).replace(/\.0$/, '')} h</dd>`}
       </dl>
-      ${sel ? `<h3>${sel.level} hPa</h3>${head}` : ''}
+      ${sel ? `<h3>${sel.level} ${p.levelUnit}</h3>${head}` : ''}
       <h3>Vertical profile</h3>
       <table class="profile">
-        <thead><tr><th>hPa</th><th>z (m)</th><th>m/s</th><th>dir</th></tr></thead>
+        <thead><tr><th>${p.levelUnit === 'hPa' ? 'hPa' : 'AGL (m)'}</th><th>z (m)</th><th>m/s</th><th>dir</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <p class="note">Grey rows: level lies below the terrain here.</p>`;

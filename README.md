@@ -34,13 +34,15 @@ from a shell with Developer Mode enabled. macOS and Linux work as-is.
 
 ## Data in this repo
 
-Included in `data/web/` (3.7 MB, everything the viewer loads):
+Included in `data/web/` (about 17 MB, everything the viewer loads):
 
 - FCN3 forecast initialized 2024-01-31 06 UTC: T+0 to T+24 h, 5 pressure levels (u, v, height, wind speed) and the 10 m wind
 - Aurora 0.1° forecast for the same case and the same fields (65 model grid points over Senja, against 12 for FCN3)
 - GraphCast 0.25° forecast for the same case and the same fields (12 grid points; same ERA5 initial state as FCN3)
 - Senja terrain: Kartverket DTM resampled to 256 × 256
 - Synthetic wind field (with a 10 m wind) and synthetic terrain, for testing the frontend
+- OpenFOAM CFD over a 6 × 6 km box around Segla/Ersfjord (nine steady cases: from SW at 8, 12 and 16 m/s, and from W, NW, N, NE, E and S at 12 m/s),
+  on six levels from 10 to 800 m above ground, with its own 10 m DEM terrain (see [CFD datasets](#cfd-datasets))
 
 Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the scripts):
 
@@ -53,6 +55,7 @@ Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the
 | ERA5 input (GraphCast) and GraphCast 0.25° weights | 0.7 + 0.14 GB | `/cluster/work/projects/nn8106k/siyan/{graphcast_cache,windvis_weights/graphcast-operational}` | `graphcast_inference.py --fetch-only` |
 | IFS HRES analysis GRIB (Aurora input) and Aurora 0.1° weights | 6.5 + 4.9 GB | `/cluster/work/projects/nn8106k/siyan/{aurora01_cache,windvis_weights/aurora-0.1}` | `aurora01_inference.py --fetch-only` |
 | Synthetic `.zarr` | 0.9 MB | `data/synthetic/` | `python preprocessing/make_synthetic.py` |
+| OpenFOAM cases (mesh + solved fields) | ~0.1 GB each | LUMI `/scratch/project_465003463/siyan/github/wind_sim/case_senja*` | `wind_sim/` (separate repo), then `convert_openfoam.py` |
 
 The preprocessing scripts run on any machine after `pip install -r requirements.txt`
 (`terrain.py` downloads from Kartverket, so it needs internet). FCN3 inference needs an
@@ -71,6 +74,7 @@ model/graphcast_inference.py   GraphCast 0.25°: fetch ERA5 from ARCO (login nod
 jobs/run_graphcast_senja.slurm SLURM wrapper (GH200, earth2studio-graphcast env: jax[cuda13], dm-haiku, graphcast)
 preprocessing/common_schema.py common schema, zarr writer, web export, data index
 preprocessing/convert_fcn3.py  raw FCN3 crop → common schema (.zarr + web export)
+preprocessing/convert_openfoam.py  steady OpenFOAM cases → terrain-following levels + CFD-box terrain (web export)
 preprocessing/make_synthetic.py Phase 0 synthetic wind + synthetic terrain
 preprocessing/terrain.py       Kartverket NHM DTM (WCS) → Senja terrain grid
 data/terrain/                  source DTM GeoTIFF (25 m, EPSG:25833), kept for later high-res work
@@ -102,6 +106,41 @@ frontend/                      TypeScript + Three.js + Vite viewer
 The web export is `manifest.json` (coordinates, shape and value ranges) plus one little-endian
 float32 `.bin` per variable. `data/web/index.json` lists every dataset and terrain, and is
 rebuilt automatically on each export.
+
+Optional manifest fields, used by the CFD datasets:
+
+| field         | meaning |
+|---------------|---------|
+| `label`       | menu name (default: model + init time) |
+| `level_units` | unit of `levels`: `hPa` (default) or `m AGL`; `height` is then ground + level |
+| `terrain`     | id of the terrain the dataset's domain was built on. Both viewers switch to it, and back to the default terrain when another dataset is chosen |
+
+## CFD datasets
+
+Steady RANS runs (OpenFOAM `simpleFoam`, k-ε, neutral log-law inflow) from the `wind_sim`
+project, on a ~197 k-cell terrain-following mesh over a 6 × 6 km box at Segla/Ersfjord
+(69.56–69.61° N, 17.41–17.55° E). Each case is one inflow direction and speed (`Uref` at
+10 m), not a forecast: the dataset has a single frame, and the viewers hide the timeline.
+
+`convert_openfoam.py` interpolates the cell-centre velocity (linear on a Delaunay
+triangulation in x, y and height above ground) to 96 × 96 points at 10, 50, 100, 200, 400 and
+800 m above ground, rotates u/v from UTM grid north to true north (~2° here), and trims 250 m
+off each side of the box, where terrain meets the inflow/outflow boundaries. The 10 m level
+is also exported as `u10`/`v10`, so the surface page can show it. Terrain adjustment is
+switched off there for CFD, since the CFD already resolves the terrain.
+
+```bash
+# cell centres, once per mesh (OpenFOAM v2412 on LUMI: module use /appl/local/csc/modulefiles; module load openfoam/v2412)
+cp -r wind_sim/case_senja_U12/{constant,system} /tmp/cc/ && mkdir -p /tmp/cc/0
+postProcess -func writeCellCentres -time 0 -case /tmp/cc     # -> /tmp/cc/0/C
+
+python preprocessing/convert_openfoam.py --centres /tmp/cc/0/C \
+    --domain-info ../wind_sim/case_senja/domain_info.json --dem ../terrain_norge/7705_2_10m_z33.tif \
+    ../wind_sim/case_senja_U12 ../wind_sim/case_senja_D225_U12 ...   # ~4 min for nine cases
+```
+
+Case names give the flow direction as a math angle the flow goes *toward* (`D225` = toward
+the SW = from the NE); the 45° cases are named `case_senja_U<speed>` without a `D`.
 
 ## Running
 

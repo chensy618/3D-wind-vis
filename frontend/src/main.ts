@@ -16,7 +16,7 @@ import { PointQuery } from './ui/query';
 import { Timeline } from './ui/timeline';
 import { AdvectionContext, ParticleSystem } from './wind/advection';
 import { timeWeights, TimeWeights } from './wind/interpolation';
-import { loadIndex, loadTerrain, loadWind, Terrain, WindField } from './wind/loader';
+import { DataIndex, levelLabel, loadIndex, loadTerrain, loadWind, Terrain, terrainFor, WindField } from './wind/loader';
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
@@ -37,6 +37,7 @@ const state = {
 interface Loaded {
   wind: WindField;
   terrain: Terrain;
+  terrainId: string;
   domain: Domain;
   maxSpeed: number;
   content: THREE.Group;
@@ -47,6 +48,7 @@ interface Loaded {
 }
 
 let data: Loaded | null = null;
+let index: DataIndex | null = null;
 let rig: CameraRig | null = null;
 let probe: { x: number; y: number } | null = null;
 /** A new probe point (click or query): restart the highlight pulse; `focus`: also pan the camera to it. */
@@ -135,13 +137,29 @@ $('#reset-camera').addEventListener('click', () => rig?.reset());
 
 const datasetSel = $<HTMLSelectElement>('#dataset');
 const terrainSel = $<HTMLSelectElement>('#terrain');
-const onDataChange = () => {
+const onDataChange = (e?: Event) => {
+  if (index && e?.target === datasetSel) terrainSel.value = terrainFor(index, datasetSel.value, terrainSel.value);
   const q = new URLSearchParams({ data: datasetSel.value, terrain: terrainSel.value });
   history.replaceState(null, '', `?${q}`);
   void load(datasetSel.value, terrainSel.value);
 };
 datasetSel.addEventListener('change', onDataChange);
 terrainSel.addEventListener('change', onDataChange);
+
+/**
+ * Flow speed and vertical exaggeration suited to the domain size: the defaults (×300, ×4) are
+ * for the ~50 km forecast domain; a 6 km CFD box needs slower particles and less stretch.
+ */
+function applyDomainDefaults(domain: Domain): void {
+  const scale = Math.max(domain.width, domain.depth) / 52;
+  const set = (id: string, v: number) => {
+    const inp = $<HTMLInputElement>(`#${id}`);
+    inp.value = String(v);
+    inp.dispatchEvent(new Event('input'));
+  };
+  set('flow-speed', Math.max(10, Math.round((300 * scale) / 5) * 5));
+  set('exaggeration', Math.min(4, Math.max(1, Math.round(8 * Math.sqrt(scale)) / 2)));
+}
 
 // ---------------------------------------------------------------- helpers
 function currentTw(): TimeWeights {
@@ -191,7 +209,7 @@ function applyExaggeration(): void {
   const top = w.manifest.variables.height.max + 500;
   data.content.getObjectByName('domain-frame')?.removeFromParent();
   data.content.add(buildDomainFrame(data.domain, (top / 1000) * state.exaggeration));
-  data.annotations.build(w.levels, meanHeights(w), state.exaggeration, top);
+  data.annotations.build(w.levels, meanHeights(w), state.exaggeration, top, w.manifest.level_units);
   resetParticles();
   surfaceDirty = true;
   lastProbeT = -1;
@@ -226,6 +244,7 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
   try {
     const [wind, terrain] = await Promise.all([loadWind(datasetId), loadTerrain(terrainId)]);
     const domain = Domain.fromGrid(terrain.grid);
+    const newDomain = data?.terrainId !== terrainId;
 
     if (data) {
       data.annotations.dispose();
@@ -242,6 +261,7 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
     data = {
       wind,
       terrain,
+      terrainId,
       domain,
       maxSpeed: niceMax(wind.manifest.variables.wind_speed.max),
       content,
@@ -253,6 +273,8 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
     if (!rig) {
       rig = createCamera(canvas, domain);
       resize();
+    } else if (newDomain) {
+      rig.setDomain(domain);
     }
 
     const m = wind.manifest;
@@ -264,12 +286,16 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
 
     state.levels = state.levels.filter((i) => i < m.levels.length);
     if (!state.levels.length) state.levels = [Math.min(2, m.levels.length - 1)];
-    levelSel.setLevels(m.levels, meanHeights(wind), state.levels);
+    levelSel.setLevels(m.levels, meanHeights(wind), state.levels, m.level_units);
+    // a steady CFD solution has a single frame and no forecast clock
+    $('#timeline').hidden = m.times.length === 1;
     timeline.setData(m.times, m.init_time);
     setTime(Math.min(Math.max(state.t, m.times[0]), m.times[m.times.length - 1]));
-    applyExaggeration();
+    if (newDomain) applyDomainDefaults(domain); // also applies the exaggeration
+    else applyExaggeration();
     query.setBounds(domain);
-    if (probe && !domain.contains(probe.x, probe.y)) {
+    // probe coordinates are local to the old domain
+    if (probe && (newDomain || !domain.contains(probe.x, probe.y))) {
       probe = null;
       inspector.hide();
       marker.hide();
@@ -327,6 +353,8 @@ function updateProbe(): void {
     terrain: ground,
     model: wind.manifest.model,
     lead: state.t,
+    steady: wind.times.length === 1,
+    levelUnit: wind.manifest.level_units ?? 'hPa',
     selectedLevels: state.mode === 'single' ? state.levels : [],
     rows,
     maxSpeed: data.maxSpeed,
@@ -351,7 +379,7 @@ function updateNotice(): void {
   // chosen levels with no live particle lie below the terrain everywhere
   const alive = new Set<number>();
   for (let i = 0; i < ps.n; i++) if (ps.alive[i]) alive.add(ps.level[i]);
-  const empty = state.levels.filter((i) => !alive.has(i)).map((i) => `${data!.wind.levels[i]} hPa`);
+  const empty = state.levels.filter((i) => !alive.has(i)).map((i) => levelLabel(data!.wind.manifest, data!.wind.levels[i]));
   el.hidden = empty.length === 0;
   if (!empty.length) return;
   const one = empty.length === 1;
@@ -418,7 +446,7 @@ function frame(): void {
 // ---------------------------------------------------------------- start
 async function start(): Promise<void> {
   try {
-    const index = await loadIndex();
+    index = await loadIndex();
     if (!index.datasets.length) throw new Error('no datasets in data/index.json');
     datasetSel.innerHTML = index.datasets.map((d) => `<option value="${d.id}">${d.label}</option>`).join('');
     terrainSel.innerHTML = index.terrains.map((d) => `<option value="${d.id}">${d.label}</option>`).join('');
@@ -426,7 +454,7 @@ async function start(): Promise<void> {
     const pick = (list: { id: string }[], want: string | null, prefer: string) =>
       list.find((d) => d.id === want)?.id ?? list.find((d) => d.id === prefer)?.id ?? list[0].id;
     datasetSel.value = pick(index.datasets, q.get('data'), 'fcn3');
-    terrainSel.value = pick(index.terrains, q.get('terrain'), 'terrain');
+    terrainSel.value = terrainFor(index, datasetSel.value, pick(index.terrains, q.get('terrain'), 'terrain'));
     await load(datasetSel.value, terrainSel.value);
   } catch (err) {
     setLoading(null);

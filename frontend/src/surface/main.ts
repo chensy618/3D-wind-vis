@@ -11,7 +11,7 @@ import { windFrom } from '../ui/inspector';
 import { renderScale, ScaleSpec } from '../ui/legend';
 import { PointQuery } from '../ui/query';
 import { timeWeights } from '../wind/interpolation';
-import { loadIndex, loadTerrain, loadWind, loadWindManifest, Terrain, WindField } from '../wind/loader';
+import { DataIndex, loadIndex, loadTerrain, loadWind, loadWindManifest, Terrain, terrainFor, WindField } from '../wind/loader';
 import { SurfaceParams, SurfaceWindModel } from './model';
 import { ArrowField, ArrowPoint, GridKind, GridOverlay, TenMetreMarker } from './overlays';
 import { Cell, nearest, SurfaceParticles, WindLayer } from './particles';
@@ -44,10 +44,16 @@ const view = {
 interface ModelEntry {
   id: string;
   name: string;
+  /** menu label */
+  label: string;
   /** spacing of its own lat/lon grid, degrees */
   deg: number;
+  /** its own terrain (a CFD box), which already shapes the wind */
+  terrain?: string;
 }
 /** The selected model's forecast and its clock. */
+let index: DataIndex | null = null;
+const terrainSel = $<HTMLSelectElement>('#terrain');
 const source = { models: [] as ModelEntry[], model: null as ModelEntry | null, wind: null as WindField | null, t: 0, playing: false };
 
 /** One model grid cell clipped to the domain, with its grid point (x, y) and mean terrain slope. */
@@ -62,6 +68,7 @@ interface NativeCell extends Cell {
 
 interface Loaded {
   terrain: Terrain;
+  terrainId: string;
   domain: Domain;
   model: SurfaceWindModel;
   mesh: THREE.Mesh;
@@ -361,12 +368,21 @@ async function setModel(id: string, rebuild = true): Promise<void> {
     const w = await loadWind(id);
     source.model = entry;
     source.wind = w;
+    // CFD resolves the terrain itself: no terrain adjustment on top, and no clock for a steady case
+    view.terrainAdjust = !entry.terrain;
+    $<HTMLInputElement>('#terrain-adjust').checked = view.terrainAdjust;
+    $('.time-row').hidden = w.times.length === 1;
     timeInp.min = String(w.times[0]);
     timeInp.max = String(w.times[w.times.length - 1]);
     source.t = Math.min(Math.max(source.t, w.times[0]), w.times[w.times.length - 1]);
     timeInp.value = String(source.t);
     setTimeLabel();
-    if (rebuild && data) {
+    const terrainId = index ? terrainFor(index, id, terrainSel.value) : terrainSel.value;
+    if (rebuild && data && terrainId !== data.terrainId) {
+      terrainSel.value = terrainId;
+      history.replaceState(null, '', `?terrain=${terrainId}`);
+      await load(terrainId);
+    } else if (rebuild && data) {
       const { cells, cellOf } = buildNativeCells(data.domain, data.model, entry.deg);
       data.nativeCells = cells;
       data.cellOf = cellOf;
@@ -600,6 +616,7 @@ async function load(terrainId: string): Promise<void> {
   try {
     const terrain = await loadTerrain(terrainId);
     const domain = Domain.fromGrid(terrain.grid);
+    const newDomain = data?.terrainId !== terrainId;
     const model = new SurfaceWindModel(terrain, domain);
 
     if (data) {
@@ -619,11 +636,19 @@ async function load(terrainId: string): Promise<void> {
     scene.add(north);
 
     const { cells: nativeCells, cellOf } = buildNativeCells(domain, model, source.model!.deg);
-    data = { terrain, domain, model, mesh, north, gridCells: buildGridCells(model, domain), nativeCells, cellOf };
+    data = { terrain, terrainId, domain, model, mesh, north, gridCells: buildGridCells(model, domain), nativeCells, cellOf };
     updateGridInfo();
     if (!rig) {
       rig = createCamera(canvas, domain);
       resize();
+    } else if (newDomain) {
+      rig.setDomain(domain);
+    }
+    if (newDomain) {
+      // flow speed for the domain size (×300 suits the ~50 km domain)
+      const inp = $<HTMLInputElement>('#flow-speed');
+      inp.value = String(Math.max(10, Math.round((300 * Math.max(domain.width, domain.depth)) / 52 / 5) * 5));
+      inp.dispatchEvent(new Event('input'));
     }
     probe = null;
     placeTenMarker();
@@ -701,22 +726,23 @@ function frame(): void {
 // ---------------------------------------------------------------- start
 async function start(): Promise<void> {
   try {
-    const index = await loadIndex();
+    index = await loadIndex();
     // every dataset with a 10 m wind field is a model to choose from
     const manifests = await Promise.all(index.datasets.map((d) => loadWindManifest(d.id).catch(() => null)));
     source.models = index.datasets.flatMap((d, i) => {
       const m = manifests[i];
-      return m?.surface?.u10 ? [{ id: d.id, name: m.model, deg: m.native_deg ?? 0.25 }] : [];
+      if (!m?.surface?.u10) return [];
+      const deg = m.native_deg ?? 0.25;
+      return [{ id: d.id, name: m.model, label: m.label ?? `${m.model} ${deg}°`, deg, terrain: m.terrain }];
     });
     if (!source.models.length) throw new Error('no dataset with a 10 m wind field; run FCN3 and convert_fcn3.py (see README)');
     modelSel.innerHTML = source.models
-      .map((m) => `<option value="${m.id}">${m.name} ${m.deg}°</option>`)
+      .map((m) => `<option value="${m.id}">${m.label}</option>`)
       .join('');
     await setModel(source.models[0].id, false);
-    const terrainSel = $<HTMLSelectElement>('#terrain');
     terrainSel.innerHTML = index.terrains.map((d) => `<option value="${d.id}">${d.label}</option>`).join('');
     const q = new URLSearchParams(location.search);
-    terrainSel.value = index.terrains.find((d) => d.id === q.get('terrain'))?.id ?? index.terrains[0].id;
+    terrainSel.value = terrainFor(index, source.models[0].id, index.terrains.find((d) => d.id === q.get('terrain'))?.id ?? index.terrains[0].id);
     terrainSel.addEventListener('change', () => {
       history.replaceState(null, '', `?terrain=${terrainSel.value}`);
       void load(terrainSel.value);

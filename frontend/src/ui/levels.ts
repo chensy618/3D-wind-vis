@@ -18,7 +18,7 @@ export class LevelSelector {
         <button data-mode="single" class="on">Selected levels</button>
         <button data-mode="multi">All levels</button>
       </div>
-      <div class="level-list" role="group" aria-label="Pressure levels"></div>`;
+      <div class="level-list" role="group" aria-label="Levels"></div>`;
     this.list = root.querySelector('.level-list')!;
     root.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) =>
       b.addEventListener('click', () => this.setMode(b.dataset.mode as LevelMode)),
@@ -30,17 +30,17 @@ export class LevelSelector {
     return [...this.selected].sort((a, b) => a - b);
   }
 
-  /** @param levels hPa, @param heights mean geopotential height (m) per level */
-  setLevels(levels: number[], heights: number[], selected: number[]): void {
+  /** @param levels in `unit` (hPa or m AGL), @param heights mean height (m) per level */
+  setLevels(levels: number[], heights: number[], selected: number[], unit = 'hPa'): void {
     this.selected = new Set(selected);
     // highest level on top
-    const order = levels.map((_, i) => i).sort((a, b) => levels[a] - levels[b]);
+    const order = levels.map((_, i) => i).sort((a, b) => heights[b] - heights[a]);
     this.list.innerHTML = order
       .map(
         (i) => `
         <label class="level-row">
           <input type="checkbox" value="${i}" ${this.selected.has(i) ? 'checked' : ''} />
-          <span class="lv-p">${levels[i]} hPa</span>
+          <span class="lv-p">${levels[i]} ${unit}</span>
           <span class="lv-h">≈ ${(heights[i] / 1000).toFixed(2)} km</span>
         </label>`,
       )

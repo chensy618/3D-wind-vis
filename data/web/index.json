@@ -5,6 +5,51 @@
    "label": "Aurora \u00b7 2024-01-31 06Z"
   },
   {
+   "id": "cfd-senja-e-u12",
+   "label": "CFD \u00b7 from E 12 m/s",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "cfd-senja-n-u12",
+   "label": "CFD \u00b7 from N 12 m/s",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "cfd-senja-ne-u12",
+   "label": "CFD \u00b7 from NE 12 m/s",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "cfd-senja-nw-u12",
+   "label": "CFD \u00b7 from NW 12 m/s",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "cfd-senja-s-u12",
+   "label": "CFD \u00b7 from S 12 m/s",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "cfd-senja-sw-u08",
+   "label": "CFD \u00b7 from SW 8 m/s",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "cfd-senja-sw-u12",
+   "label": "CFD \u00b7 from SW 12 m/s",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "cfd-senja-sw-u16",
+   "label": "CFD \u00b7 from SW 16 m/s",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
+   "id": "cfd-senja-w-u12",
+   "label": "CFD \u00b7 from W 12 m/s",
+   "terrain": "terrain-cfd-senja"
+  },
+  {
    "id": "fcn3",
    "label": "FCN3 \u00b7 2024-01-31 06Z"
   },
@@ -21,6 +66,10 @@
   {
    "id": "terrain",
    "label": "Senja DTM (Kartverket)"
+  },
+  {
+   "id": "terrain-cfd-senja",
+   "label": "Senja CFD box (Kartverket 10 m)"
   },
   {
    "id": "terrain-synthetic",

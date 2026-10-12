@@ -17,6 +17,17 @@ export interface WindManifest {
   native_deg?: number;
   /** Optional surface fields (u10, v10), laid out (time, lat, lon). */
   surface?: Record<string, { file: string; units: string; min: number; max: number }>;
+  /** Display name for menus (falls back to model + init time). */
+  label?: string;
+  /** Unit of `levels`: pressure (default, 'hPa') or height above ground ('m AGL', CFD). */
+  level_units?: string;
+  /** Terrain id this dataset's domain was built on (e.g. a CFD box); the viewers switch to it. */
+  terrain?: string;
+}
+
+/** "850 hPa" or "100 m AGL". */
+export function levelLabel(m: WindManifest, level: number): string {
+  return `${level} ${m.level_units ?? 'hPa'}`;
 }
 
 export interface TerrainManifest {
@@ -32,6 +43,19 @@ export interface TerrainManifest {
 export interface DatasetEntry {
   id: string;
   label: string;
+  /** Terrain this dataset requires (see WindManifest.terrain). */
+  terrain?: string;
+}
+
+/**
+ * The terrain to show with a dataset: its own terrain if it has one, otherwise the current
+ * choice, unless that is another dataset's own terrain (a small CFD box), then the default.
+ */
+export function terrainFor(index: DataIndex, datasetId: string, current: string, fallback = 'terrain'): string {
+  const own = index.datasets.find((d) => d.id === datasetId)?.terrain;
+  if (own && index.terrains.some((t) => t.id === own)) return own;
+  const scoped = new Set(index.datasets.map((d) => d.terrain).filter(Boolean));
+  return scoped.has(current) ? (index.terrains.find((t) => t.id === fallback)?.id ?? current) : current;
 }
 
 export interface DataIndex {

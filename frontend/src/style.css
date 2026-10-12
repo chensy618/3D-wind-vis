@@ -136,7 +136,7 @@ button.wide { width: 100%; }
   position: absolute; inset: 0; display: flex; gap: 12px; align-items: center; justify-content: center;
   background: rgba(11, 19, 32, 0.7); font-size: 14px;
 }
-#loading[hidden], #error[hidden], #notice[hidden] { display: none; }
+#loading[hidden], #error[hidden], #notice[hidden], #timeline[hidden] { display: none; }
 .spinner { width: 22px; height: 22px; border: 3px solid rgba(255, 255, 255, 0.2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 #error {

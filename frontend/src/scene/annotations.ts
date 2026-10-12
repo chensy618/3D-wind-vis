@@ -18,7 +18,7 @@ export class Annotations {
     this.group.name = 'annotations';
   }
 
-  build(levels: number[], meanHeights: number[], exaggeration: number, topM: number): void {
+  build(levels: number[], meanHeights: number[], exaggeration: number, topM: number, unit = 'hPa'): void {
     this.dispose();
     const { domain } = this;
     // height axis on the NE corner (back right in the default view)
@@ -42,7 +42,7 @@ export class Annotations {
 
     // level tags on the east edge
     this.levelTags = levels.map((p, i) => {
-      const l = label(`${p} hPa`, 'level');
+      const l = label(`${p} ${unit}`, 'level');
       l.position.set(domain.width / 2 + 0.5, (meanHeights[i] / 1000) * exaggeration, domain.depth / 2);
       l.center.set(0, 0.5);
       this.group.add(l);
