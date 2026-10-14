@@ -26,9 +26,13 @@ export class Highlight {
     this.group.visible = false;
   }
 
-  /** Place at scene (x, y, z); `restart` starts the pulse again, for a new point. */
-  set(x: number, y: number, z: number, restart = false): void {
-    this.group.position.set(x, y + 0.02, z);
+  /**
+   * Place at scene (x, y, z); `restart` starts the pulse again, for a new point. `scale`: ring
+   * size relative to the ~52 km forecast domain (Domain.scale), so it stays small in a CFD box.
+   */
+  set(x: number, y: number, z: number, restart = false, scale = 1): void {
+    this.group.position.set(x, y + 0.02 * scale, z);
+    this.group.scale.setScalar(scale);
     this.group.visible = true;
     if (restart) this.t = 0;
   }

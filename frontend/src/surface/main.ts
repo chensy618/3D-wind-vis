@@ -109,7 +109,7 @@ const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
 sun.position.set(-40, 25, 30);
 scene.add(sun);
 
-const particles = new ParticleRenderer(true); // "--->" arrows
+const particles = new ParticleRenderer(); // streamlines: fading trails draped 10 m above the ground
 const ps = new SurfaceParticles();
 const grid = new GridOverlay();
 const arrows = new ArrowField();
@@ -121,12 +121,17 @@ scene.add(particles.group, grid.group, arrows.group, tenMarker.group, highlight.
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 const compass = (deg: number) => COMPASS[Math.round(deg / 45) % 8];
 const f1 = (x: number) => x.toFixed(1);
+/** Grid spacing for labels: degrees for forecast grids, metres for fine (CFD) grids. */
+const fmtDeg = (deg: number) => (deg >= 0.01 ? `${+deg.toPrecision(2)}°` : `~${Math.round((deg * 111_320) / 10) * 10} m`);
 
 /** Smallest "nice" value at or above v, for the vertical-wind colour scale. */
 function niceScale(v: number): number {
   for (const s of [0.5, 1, 1.5, 2, 3, 4, 5, 6, 8, 10, 15, 20]) if (s >= v) return s;
   return Math.ceil(v / 5) * 5;
 }
+
+/** Stored positions per particle: the length of its streamline (frames). */
+const TRAIL_LEN = 40;
 
 /** At most this many particles: finer grids get one particle per block of cells. */
 const MAX_PARTICLES = 1500;
@@ -172,18 +177,13 @@ function ctx() {
     domain: d.domain,
     speedFactor: view.speedFactor,
     exaggeration: view.exaggeration,
-    // few particles get long trails, many get short ones
-    trailLen: particleCells(coarse ? d.nativeCells : d.gridCells, d.domain).length <= 200 ? 40 : 6,
+    trailLen: TRAIL_LEN,
   };
 }
 
 function resetParticles(): void {
   if (!data || !shown) return;
   const c = ctx();
-  // arrows 0.6 of the particle spacing, within readable bounds for the domain
-  const spacing = Math.sqrt((data.domain.width * data.domain.depth) / c.cells.length);
-  const size = Math.max(data.domain.width, data.domain.depth);
-  particles.setArrowSize(Math.min(Math.max(0.6 * spacing, size / 120), size / 20));
   ps.reset(c);
 }
 
@@ -201,7 +201,7 @@ function updateGridInfo(): void {
   // full cell size: the largest extent in each direction (edge cells are clipped by the domain)
   const fmt = (km: number) => (km < 10 ? km.toFixed(1) : Math.round(km).toString());
   const { w, h } = largestCell(data.nativeCells);
-  $('#grid-native').textContent = `${m.name} (${m.deg}°)`;
+  $('#grid-native').textContent = `${m.name} (${fmtDeg(m.deg)})`;
   $('#grid-terrain').textContent = `Terrain (${Math.round((data.model.dx * 1000) / 50) * 50} m)`;
   const n = view.grid === 'native' ? data.nativeCells.length : data.gridCells.length;
   const size = view.grid === 'native' ? `~${fmt(w)} × ${fmt(h)} km` : `${Math.round(data.model.dx * 1000)} m`;
@@ -248,7 +248,7 @@ function placeTenMarker(restart = false): void {
   const { terrain, domain } = data;
   tenMarker.set(terrain, domain, probe.x, probe.y, view.exaggeration);
   const ground = (terrain.at(domain.lat(probe.y), domain.lon(probe.x)) / 1000) * view.exaggeration;
-  highlight.set(domain.sceneX(probe.x), ground, domain.sceneZ(probe.y), restart);
+  highlight.set(domain.sceneX(probe.x), ground, domain.sceneZ(probe.y), restart, domain.scale);
 }
 
 const query = new PointQuery($('#query'), (lat, lon) => {
@@ -499,11 +499,13 @@ function computeShown(): Shown | null {
     const out: Shown = { ...base, u: new Float32Array(n), v: new Float32Array(n), w: new Float32Array(n), speed: new Float32Array(n) };
     const cu = nativeCells.map((c) => w.sampleSurface(w.u10!, tw, c.lat, c.lon));
     const cv = nativeCells.map((c) => w.sampleSurface(w.v10!, tw, c.lat, c.lon));
+    // the dataset's own 10 m vertical wind (CFD, WindINR), else the flow along the cell's mean slope
+    const cw = w.w10 ? nativeCells.map((c) => w.sampleSurface(w.w10!, tw, c.lat, c.lon)) : null;
     for (let k = 0; k < n; k++) {
       const c = cellOf[k];
       out.u[k] = cu[c];
       out.v[k] = cv[c];
-      out.w[k] = cu[c] * nativeCells[c].hx + cv[c] * nativeCells[c].hy;
+      out.w[k] = cw ? cw[c] : cu[c] * nativeCells[c].hx + cv[c] * nativeCells[c].hy;
       out.speed[k] = Math.hypot(cu[c], cv[c]);
     }
     return out;
@@ -603,8 +605,13 @@ function updateProbe(): void {
       else if (ratio > 1.1) kind = 'Exposed: the wind speeds up here';
       else kind = 'Little vertical motion here';
     } else if (shelter < 0.8) kind = 'Water in the lee of land: sheltered';
+  } else if (source.model?.terrain && elev > 0.5) {
+    // a CFD case on its own terrain: its w already is the terrain's effect
+    if (w > 0.15 * wScale) kind = 'Windward slope: air is forced up';
+    else if (w < -0.15 * wScale) kind = 'Lee slope: air sinks downhill';
+    else kind = 'Little vertical motion here';
   } else {
-    kind = `${source.model?.name ?? 'Model'} as it is: one wind per ${source.model?.deg}° grid cell`;
+    kind = `${source.model?.name ?? 'Model'} as it is: one wind per ${fmtDeg(source.model?.deg ?? 0)} grid cell`;
   }
   el.hidden = false;
   el.innerHTML = `
@@ -629,8 +636,9 @@ function recompute(): void {
   shown = computeShown();
   if (!shown) return;
   // colour scales come from the terrain-adjusted field, so the raw model shares them
-  // and its weak vertical wind is not stretched to look strong
-  if (view.terrainAdjust) {
+  // and its weak vertical wind is not stretched to look strong; a CFD case on its own
+  // terrain (no adjustment) sets them from its own wind
+  if (view.terrainAdjust || source.model?.terrain) {
     const { model } = data;
     const absW: number[] = [];
     let top = 0;
@@ -683,7 +691,7 @@ async function load(terrainId: string): Promise<void> {
     Object.assign(mesh.material as THREE.MeshStandardMaterial, { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 4 });
     scene.add(mesh);
     const north = new CSS2DObject(Object.assign(document.createElement('div'), { className: 'label3d north', textContent: 'N ↑' }));
-    north.position.set(0, 0, -domain.depth / 2 - 2);
+    north.position.set(0, 0, -domain.depth / 2 - 2 * domain.scale);
     scene.add(north);
 
     const { cells: nativeCells, cellOf } = buildNativeCells(domain, model, source.model!.deg);

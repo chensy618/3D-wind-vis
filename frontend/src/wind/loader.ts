@@ -15,7 +15,7 @@ export interface WindManifest {
   variables: Record<string, { file: string; units: string; min: number; max: number }>;
   /** Spacing (degrees) of the model's own lat/lon grid, when known. */
   native_deg?: number;
-  /** Optional surface fields (u10, v10), laid out (time, lat, lon). */
+  /** Optional surface fields (u10, v10, w10), laid out (time, lat, lon). */
   surface?: Record<string, { file: string; units: string; min: number; max: number }>;
   /** Display name for menus (falls back to model + init time). */
   label?: string;
@@ -114,6 +114,9 @@ export class WindField {
     /** 10 m wind (time, lat, lon), when the model provides it */
     readonly u10: Float32Array | null = null,
     readonly v10: Float32Array | null = null,
+    /** vertical wind (time, level, lat, lon), positive up, when the source provides it (WindINR) */
+    readonly w: Float32Array | null = null,
+    readonly w10: Float32Array | null = null,
   ) {
     [this.nt, this.nl, this.ny, this.nx] = manifest.shape;
     this.grid = new RegularGrid(manifest.lat, manifest.lon);
@@ -158,11 +161,14 @@ export async function loadWind(id: string, base = 'data'): Promise<WindField> {
     ['u', 'v', 'height', 'wind_speed'].map((k) => fetchF32(`${dir}/${m.variables[k].file}`, n)),
   );
   const sf = m.surface;
+  const ns = m.shape[0] * m.shape[2] * m.shape[3];
   const [u10, v10] =
-    sf?.u10 && sf?.v10
-      ? await Promise.all([sf.u10, sf.v10].map((x) => fetchF32(`${dir}/${x.file}`, m.shape[0] * m.shape[2] * m.shape[3])))
-      : [null, null];
-  return new WindField(m, u, v, h, s, u10, v10);
+    sf?.u10 && sf?.v10 ? await Promise.all([sf.u10, sf.v10].map((x) => fetchF32(`${dir}/${x.file}`, ns))) : [null, null];
+  const [w, w10] = await Promise.all([
+    m.variables.w ? fetchF32(`${dir}/${m.variables.w.file}`, n) : null,
+    sf?.w10 ? fetchF32(`${dir}/${sf.w10.file}`, ns) : null,
+  ]);
+  return new WindField(m, u, v, h, s, u10, v10, w, w10);
 }
 
 export class Terrain {

@@ -55,6 +55,11 @@ export class Domain {
     this.depth = (latMax - latMin) * KM_PER_DEG_LAT;
   }
 
+  /** Size relative to the ~52 km forecast domain the fixed marker and label sizes were made for. */
+  get scale(): number {
+    return Math.max(this.width, this.depth) / 52;
+  }
+
   static fromGrid(g: RegularGrid): Domain {
     return new Domain(g.latMin, g.latMax, g.lonMin, g.lonMax);
   }

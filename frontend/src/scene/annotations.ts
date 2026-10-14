@@ -18,6 +18,12 @@ export class Annotations {
     this.group.name = 'annotations';
   }
 
+  /** Height-axis tick spacing (m): about 2 to 6 ticks up to `topM`. */
+  private static tickStep(topM: number): number {
+    for (const s of [250, 500, 1000, 2000]) if (topM / s <= 6) return s;
+    return 5000;
+  }
+
   build(levels: number[], meanHeights: number[], exaggeration: number, topM: number, unit = 'hPa'): void {
     this.dispose();
     const { domain } = this;
@@ -25,14 +31,16 @@ export class Annotations {
     const x0 = domain.width / 2;
     const z0 = -domain.depth / 2;
 
+    const s = domain.scale; // tick and label offsets shrink with the domain
+    const step = Annotations.tickStep(topM);
     const ticks: number[] = [];
-    for (let h = 0; h <= topM; h += 1000) ticks.push(h);
+    for (let h = 0; h <= topM; h += step) ticks.push(h);
     const pts: number[] = [x0, 0, z0, x0, (ticks[ticks.length - 1] / 1000) * exaggeration, z0];
     for (const h of ticks) {
       const y = (h / 1000) * exaggeration;
-      pts.push(x0, y, z0, x0 + 0.8, y, z0);
+      pts.push(x0, y, z0, x0 + 0.8 * s, y, z0);
       const l = label(`${h / 1000} km`, 'axis');
-      l.position.set(x0 + 1.2, y, z0);
+      l.position.set(x0 + 1.2 * s, y, z0);
       l.center.set(0, 0.5);
       this.group.add(l);
     }
@@ -43,7 +51,7 @@ export class Annotations {
     // level tags on the east edge
     this.levelTags = levels.map((p, i) => {
       const l = label(`${p} ${unit}`, 'level');
-      l.position.set(domain.width / 2 + 0.5, (meanHeights[i] / 1000) * exaggeration, domain.depth / 2);
+      l.position.set(domain.width / 2 + 0.5 * s, (meanHeights[i] / 1000) * exaggeration, domain.depth / 2);
       l.center.set(0, 0.5);
       this.group.add(l);
       return l;
@@ -51,7 +59,7 @@ export class Annotations {
 
     // north arrow
     const n = label('N ↑', 'north');
-    n.position.set(0, 0, -domain.depth / 2 - 2);
+    n.position.set(0, 0, -domain.depth / 2 - 2 * s);
     this.group.add(n);
   }
 
@@ -91,8 +99,9 @@ export class ProbeMarker {
     this.group.visible = false;
   }
 
-  set(x: number, z: number, groundY: number, levelYs: number[]): void {
-    const top = Math.max(groundY, ...levelYs) + 0.5;
+  /** `pad`: how far (scene km) the line reaches above the highest dot. */
+  set(x: number, z: number, groundY: number, levelYs: number[], pad = 0.5): void {
+    const top = Math.max(groundY, ...levelYs) + pad;
     this.line.geometry.setAttribute('position', new THREE.Float32BufferAttribute([x, groundY, z, x, top, z], 3));
     this.dots.geometry.setAttribute(
       'position',

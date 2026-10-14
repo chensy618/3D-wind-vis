@@ -170,18 +170,19 @@ export class TenMetreMarker {
 
   set(terrain: Terrain, domain: Domain, x: number, y: number, exaggeration: number): void {
     disposeGroup(this.group);
+    const stick = 0.6 * domain.scale; // stick above the 10 m point, shorter in a small domain
     const X = domain.sceneX(x);
     const Z = domain.sceneZ(y);
     const ground = (terrain.at(domain.lat(y), domain.lon(x)) / 1000) * exaggeration;
     const top = drapeY(terrain, domain, x, y, exaggeration);
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute([X, ground, Z, X, top + 0.6, Z], 3));
+    g.setAttribute('position', new THREE.Float32BufferAttribute([X, ground, Z, X, top + stick, Z], 3));
     this.group.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffffff })));
     const dot = new THREE.BufferGeometry();
     dot.setAttribute('position', new THREE.Float32BufferAttribute([X, top, Z], 3));
     this.group.add(new THREE.Points(dot, new THREE.PointsMaterial({ color: 0xffffff, size: 8, sizeAttenuation: false })));
     const l = label(`● 10 m above ground · ${Math.round(terrain.at(domain.lat(y), domain.lon(x)) + AGL_M)} m a.s.l.`, 'ten');
-    l.position.set(X, top + 0.6, Z);
+    l.position.set(X, top + stick, Z);
     l.center.set(0, 1);
     this.group.add(l);
   }

@@ -5,6 +5,8 @@ export interface ProbeRow {
   height: number; // m
   u: number;
   v: number;
+  /** vertical wind, positive up, when the dataset has it */
+  w?: number;
   speed: number;
   belowGround: boolean;
 }
@@ -20,6 +22,8 @@ export interface ProbeInfo {
   levelUnit: string; // 'hPa' or 'm AGL'
   selectedLevels: number[]; // indices into rows; empty in all-levels mode
   rows: ProbeRow[];
+  /** 10 m above ground, when the dataset has a surface wind */
+  surface?: ProbeRow | null;
   maxSpeed: number;
 }
 
@@ -29,6 +33,7 @@ export function windFrom(u: number, v: number): number {
 }
 
 const f1 = (x: number) => x.toFixed(1);
+const signed = (x: number) => `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(1)}`;
 
 /** Point-inspection panel with a vertical profile of all levels. */
 export class Inspector {
@@ -54,23 +59,27 @@ export class Inspector {
           <dt>Height</dt><dd>${Math.round(sel.height).toLocaleString('en')} m</dd>
           <dt>U</dt><dd>${f1(sel.u)} m/s</dd>
           <dt>V</dt><dd>${f1(sel.v)} m/s</dd>
+          ${sel.w !== undefined ? `<dt>W</dt><dd>${sel.w.toFixed(2)} m/s ${sel.w >= 0 ? '(rising)' : '(sinking)'}</dd>` : ''}
           <dt>Wind speed</dt><dd><b>${f1(sel.speed)} m/s</b></dd>
           <dt>Direction</dt><dd>${Math.round(windFrom(sel.u, sel.v))}° (from)</dd>
         </dl>`
       : '';
+    const hasW = p.rows.some((r) => r.w !== undefined);
+    // W (signed, 1 decimal) for datasets with vertical wind; inside the terrain there is none
+    const wCell = (r: ProbeRow) => (hasW ? `<td>${r.w === undefined || r.belowGround ? '—' : signed(r.w)}</td>` : '');
+    const row = (r: ProbeRow, label: string, cls: string) => `
+        <tr class="${cls}">
+          <td>${label}</td>
+          <td>${Math.round(r.height)}</td>
+          <td><span class="sw" style="background:${colormapCss(r.speed / p.maxSpeed)}"></span>${f1(r.speed)}</td>
+          ${wCell(r)}
+          <td><span class="arrow" style="transform:rotate(${windFrom(r.u, r.v) + 180}deg)">↑</span>${Math.round(windFrom(r.u, r.v))}°</td>
+        </tr>`;
     const rows = [...p.rows]
       .map((r, i) => ({ r, i }))
       .sort((a, b) => b.r.height - a.r.height)
-      .map(
-        ({ r, i }) => `
-        <tr class="${p.selectedLevels.includes(i) ? 'sel' : ''} ${r.belowGround ? 'below' : ''}">
-          <td>${r.level}</td>
-          <td>${Math.round(r.height)}</td>
-          <td><span class="sw" style="background:${colormapCss(r.speed / p.maxSpeed)}"></span>${f1(r.speed)}</td>
-          <td><span class="arrow" style="transform:rotate(${windFrom(r.u, r.v) + 180}deg)">↑</span>${Math.round(windFrom(r.u, r.v))}°</td>
-        </tr>`,
-      )
-      .join('');
+      .map(({ r, i }) => row(r, String(r.level), `${p.selectedLevels.includes(i) ? 'sel' : ''} ${r.belowGround ? 'below' : ''}`))
+      .join('') + (p.surface ? row(p.surface, '10 m AGL', 'surf') : '');
     this.root.innerHTML = `
       <div class="insp-head">
         <h2>Point inspection</h2>
@@ -86,7 +95,7 @@ export class Inspector {
       ${sel ? `<h3>${sel.level} ${p.levelUnit}</h3>${head}` : ''}
       <h3>Vertical profile</h3>
       <table class="profile">
-        <thead><tr><th>${p.levelUnit}</th><th>z (m)</th><th>m/s</th><th>dir</th></tr></thead>
+        <thead><tr><th>${p.levelUnit}</th><th>z (m)</th><th>m/s</th>${hasW ? '<th>w</th>' : ''}<th>dir</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <p class="note">Grey rows: level lies below the terrain here.</p>`;

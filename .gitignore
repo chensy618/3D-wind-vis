@@ -2,6 +2,8 @@ frontend/node_modules
 frontend/dist
 jobs/logs
 data/terrain/*.tif
-data/forecast/
+data/forecast/*.npz
 data/synthetic/
 __pycache__/
+data/windinr/*.npz
+

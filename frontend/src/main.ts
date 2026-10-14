@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import './style.css';
 import { niceMax } from './colormap';
-import { CellBounds, Domain, nativeCellCount, nativeCells } from './geo';
+import { Domain } from './geo';
 import { Annotations, ProbeMarker } from './scene/annotations';
 import { CameraRig, createCamera } from './scene/camera';
 import { Highlight } from './scene/highlight';
@@ -32,11 +32,10 @@ const state = {
   speedFactor: 300, // simulated seconds per real second for particle motion
   exaggeration: 4,
   showSurface: true,
+  vertical: true, // move particles with w when the dataset has it
 };
 
 interface Loaded {
-  /** the model grid cells when there are few enough for one particle each, else null */
-  cells: CellBounds[] | null;
   wind: WindField;
   terrain: Terrain;
   terrainId: string;
@@ -50,8 +49,6 @@ interface Loaded {
 }
 
 let data: Loaded | null = null;
-/** Grids with more cells than this use the Particles slider instead of one particle per cell. */
-const MAX_CELL_PARTICLES = 2000;
 let index: DataIndex | null = null;
 let rig: CameraRig | null = null;
 let probe: { x: number; y: number } | null = null;
@@ -132,6 +129,10 @@ $<HTMLInputElement>('#show-surface').addEventListener('change', (e) => {
   state.showSurface = (e.target as HTMLInputElement).checked;
   surfaceDirty = true;
 });
+$<HTMLInputElement>('#vertical').addEventListener('change', (e) => {
+  state.vertical = (e.target as HTMLInputElement).checked;
+  resetParticles();
+});
 $<HTMLInputElement>('#smooth').addEventListener('change', (e) => {
   state.smooth = (e.target as HTMLInputElement).checked;
   surfaceDirty = true;
@@ -184,6 +185,7 @@ function advCtx(): AdvectionContext {
     tw: currentTw(),
     speedFactor: state.speedFactor,
     exaggeration: state.exaggeration,
+    vertical: state.vertical,
   };
 }
 
@@ -191,7 +193,7 @@ function resetParticles(): void {
   if (!data) return;
   // Mode A: half the particle budget per chosen level, up to 1.5× the budget
   const n = state.mode === 'multi' ? state.nParticles : Math.round((state.nParticles / 2) * Math.min(state.levels.length, 3));
-  ps.reset(n, activeLevels(), advCtx(), data.cells);
+  ps.reset(n, activeLevels(), advCtx());
   const active = data.wind.levels.map((_, i) => activeLevels().includes(i));
   data.annotations.highlight(active);
 }
@@ -262,17 +264,7 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
     content.add(terrainMesh, ...surfaces.map((s) => s.mesh), annotations.group);
     scene.add(content);
 
-    // particles follow the model's resolution: one per grid cell (and level) when the grid is
-    // coarser than the particle budget, otherwise the Particles slider sets the count
-    const deg = wind.manifest.native_deg;
-    const cells = deg && nativeCellCount(domain, deg) <= MAX_CELL_PARTICLES ? nativeCells(domain, deg) : null;
-    const inp = $<HTMLInputElement>('#n-particles');
-    inp.disabled = cells != null;
-    $('#n-particles-out').textContent = cells
-      ? `1 per ${deg}° grid cell (${cells.length})`
-      : state.nParticles.toLocaleString('en');
     data = {
-      cells,
       wind,
       terrain,
       terrainId,
@@ -296,6 +288,9 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
     $('#model-desc').textContent = m.description;
     $('#init-time').textContent = /^\d{4}-/.test(m.init_time) ? `init ${m.init_time.replace('T', ' ')}:00 UTC` : '';
     $('#terrain-src').textContent = terrain.manifest.source;
+    const vert = $<HTMLInputElement>('#vertical');
+    vert.disabled = !wind.w;
+    vert.parentElement!.title = wind.w ? '' : 'This dataset has no vertical wind';
     renderLegend($('#legend'), data.maxSpeed);
 
     state.levels = state.levels.filter((i) => i < m.levels.length);
@@ -348,6 +343,14 @@ canvas.addEventListener('pointerup', (e) => {
   lastProbeT = -1;
 });
 
+/** The 10 m above-ground wind (u10/v10, and w10 when the dataset has it) for the profile. */
+function surfaceRow(wind: WindField, tw: TimeWeights, lat: number, lon: number, ground: number): ProbeRow {
+  const u = wind.sampleSurface(wind.u10!, tw, lat, lon);
+  const v = wind.sampleSurface(wind.v10!, tw, lat, lon);
+  const w = wind.w10 ? wind.sampleSurface(wind.w10, tw, lat, lon) : undefined;
+  return { level: 0, height: ground + 10, u, v, w, speed: Math.hypot(u, v), belowGround: false };
+}
+
 function updateProbe(): void {
   if (!probe || !data) return;
   const { wind, terrain, domain } = data;
@@ -359,7 +362,8 @@ function updateProbe(): void {
     const u = wind.sample(wind.u, tw, i, lat, lon);
     const v = wind.sample(wind.v, tw, i, lat, lon);
     const height = wind.sample(wind.height, tw, i, lat, lon);
-    return { level, height, u, v, speed: Math.hypot(u, v), belowGround: height <= ground };
+    const w = wind.w ? wind.sample(wind.w, tw, i, lat, lon) : undefined;
+    return { level, height, u, v, w, speed: Math.hypot(u, v), belowGround: height <= ground };
   });
   inspector.show({
     lat,
@@ -371,14 +375,15 @@ function updateProbe(): void {
     levelUnit: wind.manifest.level_units ?? 'hPa',
     selectedLevels: state.mode === 'single' ? state.levels : [],
     rows,
+    surface: wind.u10 && wind.v10 ? surfaceRow(wind, tw, lat, lon, ground) : null,
     maxSpeed: data.maxSpeed,
   });
   const ex = state.exaggeration;
   const X = domain.sceneX(probe.x);
   const Z = domain.sceneZ(probe.y);
   const groundY = (ground / 1000) * ex;
-  marker.set(X, Z, groundY, rows.filter((r) => !r.belowGround).map((r) => (r.height / 1000) * ex));
-  highlight.set(X, groundY, Z, probeNew != null);
+  marker.set(X, Z, groundY, rows.filter((r) => !r.belowGround).map((r) => (r.height / 1000) * ex), 0.5 * domain.scale);
+  highlight.set(X, groundY, Z, probeNew != null, domain.scale);
   if (probeNew?.focus) rig?.focus(new THREE.Vector3(X, groundY, Z));
   probeNew = null;
 }

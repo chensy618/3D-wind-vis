@@ -7,7 +7,9 @@ converted to the same xarray Dataset before it reaches the viewer:
     variables:  u, v            [m s-1]   (t, level, lat, lon)
                 height          [m]       geopotential height Phi / g
                 wind_speed      [m s-1]   sqrt(u^2 + v^2)
-    optional:   u10, v10        [m s-1]   (t, lat, lon) 10 m wind
+    optional:   w               [m s-1]   (t, level, lat, lon) vertical wind, positive up
+                u10, v10        [m s-1]   (t, lat, lon) 10 m wind
+                w10             [m s-1]   (t, lat, lon) 10 m vertical wind
     attrs:      model, init_time, bbox, native_deg (model grid spacing), ...
 
 `export_web` then writes the browser-facing format: one manifest.json plus
@@ -37,7 +39,8 @@ SENJA_BBOX = {
 LEVELS_HPA = [1000, 925, 850, 700, 500]
 LEAD_HOURS = [0, 6, 12, 18, 24]
 VARIABLES = ["u", "v", "height", "wind_speed"]
-SURFACE_VARIABLES = {"u10": "10 m zonal wind", "v10": "10 m meridional wind"}
+OPTIONAL_VARIABLES = {"w": "vertical wind"}
+SURFACE_VARIABLES = {"u10": "10 m zonal wind", "v10": "10 m meridional wind", "w10": "10 m vertical wind"}
 
 
 def target_grid(ny: int = 64, nx: int = 64, bbox: dict = SENJA_BBOX):
@@ -59,9 +62,10 @@ def build_dataset(
     lon,
     attrs: dict,
     surface: dict[str, np.ndarray] | None = None,
+    w: np.ndarray | None = None,
 ) -> xr.Dataset:
-    """Assemble a common-schema Dataset. Arrays are (time, level, lat, lon);
-    optional `surface` fields (SURFACE_VARIABLES) are (time, lat, lon)."""
+    """Assemble a common-schema Dataset. Arrays are (time, level, lat, lon), including the
+    optional vertical wind `w`; optional `surface` fields (SURFACE_VARIABLES) are (time, lat, lon)."""
     if height is None:
         if geopotential is None:
             raise ValueError("need either geopotential or height")
@@ -83,6 +87,8 @@ def build_dataset(
         },
         attrs={"schema": "senja-common-wind-v1", **attrs},
     )
+    if w is not None:
+        ds["w"] = (dims, w.astype(np.float32), {"units": "m s-1", "long_name": OPTIONAL_VARIABLES["w"]})
     for name, arr in (surface or {}).items():
         if name not in SURFACE_VARIABLES:
             raise ValueError(f"unknown surface variable {name}")
@@ -93,8 +99,10 @@ def build_dataset(
 
 
 def validate(ds: xr.Dataset) -> None:
-    for name in VARIABLES:
+    for name in VARIABLES + list(OPTIONAL_VARIABLES):
         if name not in ds:
+            if name in OPTIONAL_VARIABLES:
+                continue
             raise ValueError(f"missing variable {name}")
         if ds[name].dims != ("time", "level", "latitude", "longitude"):
             raise ValueError(f"{name} has dims {ds[name].dims}")
@@ -122,7 +130,9 @@ def export_web(ds: xr.Dataset, out_dir: str | Path) -> Path:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     variables = {}
-    for name in VARIABLES:
+    for name in VARIABLES + list(OPTIONAL_VARIABLES):
+        if name not in ds:
+            continue
         arr = np.ascontiguousarray(ds[name].values, dtype="<f4")
         arr.tofile(out / f"{name}.bin")
         variables[name] = {

@@ -5,7 +5,7 @@ following mesh in local UTM 33 coordinates. Each case becomes one web dataset:
 
     cell centres + U (last time)  ->  horizontal levels at fixed altitudes (m above sea
     level) on a regular lat/lon grid inside the box  ->  u/v rotated from UTM grid north
-    to true north  ->  data/web/<prefix>-<case>/
+    to true north, w (positive up) as is  ->  data/web/<prefix>-<case>/
 
 and the same box gets its own terrain (data/web/<terrain-id>/) from the 10 m Kartverket
 DEM, which the viewers load automatically with these datasets (manifest "terrain").
@@ -13,7 +13,7 @@ DEM, which the viewers load automatically with these datasets (manifest "terrain
 Levels are altitudes, not pressure levels (manifest "level_units": "m ASL"); "height" is
 the level itself, so each level is a flat plane that the mountains cut through. Inside the
 terrain the wind is 0 (the viewers hide those parts). The surface page's 10 m wind
-(u10/v10) is sampled separately at 10 m above ground. There is a single, steady frame
+(u10/v10/w10) is sampled separately at 10 m above ground. There is a single, steady frame
 (time 0): the cases are idealised neutral-ABL runs for a given inflow direction and speed,
 not forecasts.
 
@@ -200,14 +200,15 @@ def main() -> None:
         U = read_vector_field(tdir / "U")
         if len(U) != len(C):
             raise ValueError(f"{case}: {len(U)} cells, mesh has {len(C)}")
-        Ug = LinearNDInterpolator(tri, U[:, :2])(tgt)
+        Ug = LinearNDInterpolator(tri, U)(tgt)
         miss = ~np.isfinite(Ug).all(axis=1)
-        Ug[miss] = U[nearest[miss], :2]
+        Ug[miss] = U[nearest[miss]]
         toward, uref, zref, z0 = inflow(case)
         with np.errstate(invalid="ignore"):  # NaN only inside the terrain, zeroed next
             log_factor = np.where(below, np.log((np.maximum(agl, 0) + z0) / z0) / np.log((z_eval + z0) / z0), 1.0)
         log_factor[inside] = 0.0
-        ux, uy = (a.reshape(nl + 1, *X.shape) * log_factor for a in Ug.T)
+        # w below the first cell centre is scaled like the horizontal wind (w ~ V·∇h near the ground)
+        ux, uy, w = (a.reshape(nl + 1, *X.shape) * log_factor for a in Ug.T)
         u = ux * ex[0] + uy * ey[0]  # UTM grid components -> true east / north
         v = ux * ex[1] + uy * ey[1]
 
@@ -216,7 +217,7 @@ def main() -> None:
         cid = f"{args.prefix}-{point.lower()}-u{int(round(uref)):02d}"
         ds = build_dataset(
             u[None, :nl], v[None, :nl], height=height[None], lead_hours=[0], levels=args.levels, lat=lat, lon=lon,
-            surface={"u10": u[None, nl], "v10": v[None, nl]},
+            surface={"u10": u[None, nl], "v10": v[None, nl], "w10": w[None, nl]}, w=w[None, :nl],
             attrs={
                 "model": "OpenFOAM CFD",
                 "init_time": "steady",
@@ -225,7 +226,7 @@ def main() -> None:
                                 f"solution at iteration {tdir.name}. Interpolated from {len(C):,} cells to flat levels at "
                                 f"{', '.join(map(str, args.levels))} m above sea level (cut by the terrain), and to "
                                 f"{SURFACE_AGL:g} m above ground for the surface wind; below the first cell centre "
-                                f"log-law extrapolated with z0 = {z0:g} m."),
+                                f"log-law extrapolated with z0 = {z0:g} m. Includes the vertical wind w (positive up)."),
                 "native_deg": 100.0 / M_PER_DEG_LAT,  # ~100 m background mesh
             },
         )
@@ -235,7 +236,7 @@ def main() -> None:
                  case=case.name, inflow={"from_deg": frm, "uref": uref, "zref": zref, "z0": z0})
         (web / cid / "manifest.json").write_text(json.dumps(m, indent=1))
         s10 = np.hypot(u[nl], v[nl])
-        print(f"{case.name} -> {cid}: 10 m AGL {s10.min():.1f}..{s10.max():.1f} m/s; inside terrain "
+        print(f"{case.name} -> {cid}: 10 m AGL {s10.min():.1f}..{s10.max():.1f} m/s, |w| max {np.abs(w).max():.1f} m/s; inside terrain "
               + ", ".join(f"{lv} m {inside[k].mean():.0%}" for k, lv in enumerate(args.levels) if inside[k].any()))
 
     update_index(web)

@@ -128,10 +128,10 @@ project, on a ~197 k-cell terrain-following mesh over a 6 × 6 km box at Segla/E
 triangulation in x, y and height above ground) to 96 × 96 points on flat levels at 50, 150,
 300, 500, 700, 1000 and 1500 m above sea level. The mountains (up to ~800 m) cut through the
 lower levels: the wind is 0 inside the terrain, and the viewer hides those parts of a level
-and lets no particles in. It also samples 10 m above ground as `u10`/`v10` for the surface
+and lets no particles in. It also samples 10 m above ground as `u10`/`v10`/`w10` for the surface
 page, where terrain adjustment is switched off for CFD, since the CFD already resolves the
 terrain. Below the first cell centre (17 m over the sea) the wind is extrapolated with the
-log law (z0 of the case). u/v are rotated from UTM grid north to true north (~2° here), and
+log law (z0 of the case). u/v are rotated from UTM grid north to true north (~2° here), w (positive up) is kept as is, and
 250 m is trimmed off each side of the box, where terrain meets the inflow/outflow boundaries.
 
 ```bash
@@ -241,7 +241,7 @@ The page is driven by a model's 10 m wind. Tuning parameters are folded under **
   - **Terrain adjustment:** off shows the model as it is, one wind per model grid cell, with vertical wind from each cell's mean slope. On, the model wind is interpolated to the 200 m terrain grid and goes through the terrain response below. Both share the colour scales of the adjusted field, so the raw model's weak vertical wind is not stretched to look strong.
 - **Show:**
   - **Colour:** the terrain by elevation only (default), by 10 m speed, or by vertical wind (red rising, blue sinking).
-  - **Grid:** chooses the model grid (~12 cells over the domain for FCN3) or the 200 m terrain grid (65 536 cells), and the line below it gives the count. The particles follow this choice: one particle per cell, which always respawns inside its cell and moves with the wind of the nearest grid point, with no smoothing between points. Arrows (More settings) use the same grid. **Grid lines** draws the grid.
+  - **Grid:** chooses the model grid (~12 cells over the domain for FCN3) or the 200 m terrain grid (65 536 cells), and the line below it gives the count. The particles follow this choice: one particle per cell, which always respawns inside its cell and draws a fading streamline as it moves with the wind interpolated between grid points. Arrows (More settings) use the same grid. **Grid lines** draws the grid.
 - **Point:** click the terrain, or type `lat, lon` under **Query point**, for the 10 m wind, how far the terrain turned it, and the vertical wind. The point gets a pulsing ring and a 10 m marker; a query also pans the camera to it.
 
 Particles, arrows and grids are drawn 10 m above the ground. Particles follow the 200 m terrain at both resolutions so that they stay visible.

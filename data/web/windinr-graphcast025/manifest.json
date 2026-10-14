@@ -2,7 +2,7 @@
  "schema": "senja-common-wind-v1",
  "model": "WindINR \u00d7 GraphCast",
  "init_time": "2024-01-31T06",
- "description": "WindINR (senja_v1/v3, trained on 65 steady CFD cases) driven by GraphCast: each lead time's background is GraphCast's mean wind between the ground and 500 m on a 7 \u00d7 7 (~1 km) grid over the CFD box. Flat levels at 50, 150, 300, 500 m above sea level (the model's height range ends at 500 m) and 10 m above ground. Below 25 m above ground the wind is taken at 25 m and extrapolated with the log law (z0 = 0.1 m), since the training data are too slow there.",
+ "description": "WindINR (senja_v1/v3, trained on 65 steady CFD cases) driven by GraphCast: each lead time's background is GraphCast's mean wind between the ground and 500 m on a 7 \u00d7 7 (~1 km) grid over the CFD box. Flat levels at 50, 150, 300, 500 m above sea level (the model's height range ends at 500 m) and 10 m above ground. Below 25 m above ground the wind is taken at 25 m and extrapolated with the log law (z0 = 0.1 m), since the training data are too slow there. Includes WindINR's vertical wind w (positive up).",
  "shape": [
   5,
   4,
@@ -242,6 +242,12 @@
    "units": "m s-1",
    "min": 0.0,
    "max": 30.410810470581055
+  },
+  "w": {
+   "file": "w.bin",
+   "units": "m s-1",
+   "min": -5.544185161590576,
+   "max": 8.198115348815918
   }
  },
  "surface": {
@@ -256,6 +262,12 @@
    "units": "m s-1",
    "min": -3.1679399013519287,
    "max": 15.42164421081543
+  },
+  "w10": {
+   "file": "w10.bin",
+   "units": "m s-1",
+   "min": -3.9250288009643555,
+   "max": 7.536514759063721
   }
  },
  "native_deg": 0.0004953866956185493,

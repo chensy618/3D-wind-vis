@@ -42,11 +42,26 @@ export function nearest(field: Float32Array, wind: WindLayer, x: number, y: numb
   return field[j * wind.nx + i];
 }
 
+/** Wind at (x, y), bilinear between the four surrounding grid points, for smooth streamlines. */
+export function bilinearAt(field: Float32Array, wind: WindLayer, x: number, y: number): number {
+  const fx = Math.min(Math.max(x / wind.dx, 0), wind.nx - 1);
+  const fy = Math.min(Math.max(y / wind.dy, 0), wind.ny - 1);
+  const i = Math.min(Math.floor(fx), wind.nx - 2);
+  const j = Math.min(Math.floor(fy), wind.ny - 2);
+  const a = fx - i;
+  const b = fy - j;
+  const k = j * wind.nx + i;
+  return (
+    (1 - b) * ((1 - a) * field[k] + a * field[k + 1]) +
+    b * ((1 - a) * field[k + wind.nx] + a * field[k + wind.nx + 1])
+  );
+}
+
 /**
  * One particle per grid cell, 10 m above the ground. A particle always respawns
- * inside its own cell and moves with the wind of the grid point it is nearest
- * to, so particle density and motion both show the grid's resolution. Following
- * the ground, the particles climb windward slopes and sink down lee slopes.
+ * inside its own cell, so particle density shows the grid's resolution, and moves
+ * with the wind interpolated between grid points, drawing a smooth streamline.
+ * Following the ground, the streamlines climb windward slopes and sink down lee slopes.
  */
 export class SurfaceParticles {
   n = 0;
@@ -114,10 +129,10 @@ export class SurfaceParticles {
       this.age[i] += dtReal;
       const x = this.x[i];
       const y = this.y[i];
-      const u = nearest(wind.u, wind, x, y);
-      const v = nearest(wind.v, wind, x, y);
+      const u = bilinearAt(wind.u, wind, x, y);
+      const v = bilinearAt(wind.v, wind, x, y);
       this.speed[i] = Math.hypot(u, v);
-      this.w[i] = nearest(wind.w, wind, x, y);
+      this.w[i] = bilinearAt(wind.w, wind, x, y);
       const nx = x + u * dtKm;
       const ny = y + v * dtKm;
       if (this.age[i] > this.maxAge[i] || !domain.contains(nx, ny)) {

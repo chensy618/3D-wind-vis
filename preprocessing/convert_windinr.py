@@ -186,16 +186,19 @@ def export(args) -> None:
     nt = pred.shape[0]
     ux = pred[..., 0].reshape(nt, nl + 1, ny, nx) * inp["log_factor"]
     uy = pred[..., 1].reshape(nt, nl + 1, ny, nx) * inp["log_factor"]
+    # vertical: no rotation; below Z_LOG_AGL scaled like the horizontal wind (w ~ V·∇h near the ground)
+    w = pred[..., 2].reshape(nt, nl + 1, ny, nx) * inp["log_factor"]
     ex, ey = inp["ex"], inp["ey"]
     u = ux * ex[0] + uy * ey[0]
     v = ux * ex[1] + uy * ey[1]
     u[:, inp["inside"]] = 0.0
     v[:, inp["inside"]] = 0.0
+    w[:, inp["inside"]] = 0.0
     height = np.broadcast_to(np.array(levels, np.float32)[None, :, None, None], (nt, nl, ny, nx))
     init = m["init_time"]
     ds = build_dataset(
         u[:, :nl], v[:, :nl], height=height, lead_hours=[int(t) for t in inp["times"]], levels=levels,
-        lat=inp["lat"], lon=inp["lon"], surface={"u10": u[:, nl], "v10": v[:, nl]},
+        lat=inp["lat"], lon=inp["lon"], surface={"u10": u[:, nl], "v10": v[:, nl], "w10": w[:, nl]}, w=w[:, :nl],
         attrs={
             "model": f"WindINR × {m['model']}",
             "init_time": init,
@@ -205,7 +208,8 @@ def export(args) -> None:
                             f"{', '.join(map(str, levels))} m above sea level (the model's height range ends at "
                             f"{args.ceiling:g} m) and 10 m above ground. Below {Z_LOG_AGL:g} m above ground the "
                             f"wind is taken at {Z_LOG_AGL:g} m and extrapolated with the log law (z0 = {Z0:g} m), "
-                            f"since the training data are too slow there."),
+                            f"since the training data are too slow there. Includes WindINR's vertical wind w "
+                            f"(positive up)."),
             # a continuous field, exported on the CFD box grid: that grid's spacing
             "native_deg": float(inp["lat"][1] - inp["lat"][0]),
         },
@@ -221,7 +225,8 @@ def export(args) -> None:
     s = np.hypot(u, v)
     for t, lt in enumerate(inp["times"]):
         print(f"T+{int(lt):02d} h: speed " + ", ".join(f"{lv} m {s[t, k][~inp['inside'][k]].mean():.1f}"
-                                                   for k, lv in enumerate(levels)) + f", 10 m AGL {s[t, nl].mean():.1f} m/s")
+                                                   for k, lv in enumerate(levels)) + f", 10 m AGL {s[t, nl].mean():.1f} m/s"
+              + f"; |w| 10 m AGL {np.abs(w[t, nl]).mean():.2f}, max {np.abs(w[t]).max():.1f} m/s")
     print("wrote", out)
 
 

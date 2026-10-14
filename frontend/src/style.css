@@ -97,6 +97,7 @@ button.wide { width: 100%; }
 .profile td { text-align: right; padding: 3px 4px; border-top: 1px solid var(--border); }
 .profile tr.sel td { background: rgba(92, 200, 255, 0.14); }
 .profile tr.below td { color: #5d6b7c; }
+.profile tr.surf td { border-top: 1px dashed var(--border); color: var(--muted); }
 .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .arrow { display: inline-block; margin-right: 4px; }
 .note { color: var(--muted); font-size: 11px; margin: 8px 0 0; }

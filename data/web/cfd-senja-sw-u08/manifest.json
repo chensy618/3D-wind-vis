@@ -2,7 +2,7 @@
  "schema": "senja-common-wind-v1",
  "model": "OpenFOAM CFD",
  "init_time": "steady",
- "description": "Steady RANS (simpleFoam, k-\u03b5) over the Senja CFD box, case case_senja_U08: neutral log-law inflow from 225\u00b0 (SW) at 8 m/s at 10 m, solution at iteration 3000. Interpolated from 196,626 cells to flat levels at 50, 150, 300, 500, 700, 1000, 1500 m above sea level (cut by the terrain), and to 10 m above ground for the surface wind; below the first cell centre log-law extrapolated with z0 = 0.1 m.",
+ "description": "Steady RANS (simpleFoam, k-\u03b5) over the Senja CFD box, case case_senja_U08: neutral log-law inflow from 225\u00b0 (SW) at 8 m/s at 10 m, solution at iteration 3000. Interpolated from 196,626 cells to flat levels at 50, 150, 300, 500, 700, 1000, 1500 m above sea level (cut by the terrain), and to 10 m above ground for the surface wind; below the first cell centre log-law extrapolated with z0 = 0.1 m. Includes the vertical wind w (positive up).",
  "shape": [
   1,
   7,
@@ -241,6 +241,12 @@
    "units": "m s-1",
    "min": 0.0,
    "max": 30.02469825744629
+  },
+  "w": {
+   "file": "w.bin",
+   "units": "m s-1",
+   "min": -8.182863235473633,
+   "max": 16.356014251708984
   }
  },
  "surface": {
@@ -255,18 +261,24 @@
    "units": "m s-1",
    "min": -14.187073707580566,
    "max": 28.434947967529297
+  },
+  "w10": {
+   "file": "w10.bin",
+   "units": "m s-1",
+   "min": -6.352565765380859,
+   "max": 16.682842254638672
   }
  },
  "native_deg": 0.0008983111749910168,
  "label": "CFD \u00b7 from SW 8 m/s",
  "level_units": "m ASL",
  "terrain": "terrain-cfd-senja",
+ "group": "CFD cases \u00b7 CFD box",
  "case": "case_senja_U08",
  "inflow": {
   "from_deg": 225.0,
   "uref": 8.0,
   "zref": 10.0,
   "z0": 0.1
- },
- "group": "CFD cases \u00b7 CFD box"
+ }
 }
