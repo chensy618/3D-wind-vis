@@ -13,15 +13,13 @@ const FLOOR_AGL = 10;
  * Near the mountain tops (within NEAR_GROUND_M of the ground, where the ground is above
  * SUMMIT_FRAC of the highest terrain), a particle that moves less than STILL_FRAC of the
  * domain size per real second draws no visible tail (it has climbed into the slow air at the
- * ground). After STILL_TIME (s) of that it fades out over FADE_OUT (s), instead of sitting
+ * ground). After stillFade.stillTime (s) of that it fades out over stillFade.fadeOut (s), instead of sitting
  * there as a lone dot. Slow particles elsewhere (e.g. a lee wake) are left alone.
  * WindINR × forecast needs this most: its 500 m ceiling leaves almost no wind on higher summits.
  */
 const NEAR_GROUND_M = 150;
 const SUMMIT_FRAC = 0.5;
 const STILL_FRAC = 0.02;
-const STILL_TIME = 0.1;
-const FADE_OUT = 0.15;
 
 export interface AdvectionContext {
   wind: WindField;
@@ -33,6 +31,8 @@ export interface AdvectionContext {
   exaggeration: number;
   /** move particles with the vertical wind w too (datasets that have it, e.g. WindINR) */
   vertical: boolean;
+  /** extra factor on w for the particles only, to make rising and sinking easier to see (default 1) */
+  wBoost?: number;
 }
 
 /**
@@ -91,12 +91,21 @@ export class ParticleSystem {
   age = new Float32Array(0);
   maxAge = new Float32Array(0);
   alive = new Uint8Array(0);
+  /** lifetime range (real seconds): each particle lives min + random · span, then respawns */
+  life = { min: 2, span: 4 };
+  /**
+   * Fading of particles stuck near the summits (see STILL_FRAC): wait `stillTime`, fade over
+   * `fadeOut` (s). `horizontal`: judge by horizontal motion only, for views that boost w.
+   */
+  stillFade = { stillTime: 0.1, fadeOut: 0.15, horizontal: false };
   /** time (s) a particle has moved too slowly to draw a tail */
   still = new Float32Array(0);
   /** Model grid cells: when set, particle i belongs to cell[i] and always respawns inside it. */
   cells: CellBounds[] | null = null;
   cell = new Int32Array(0);
-  /** History in scene coords: trail[(p * TRAIL + k) * 3], k = 0 is the newest. */
+  /** Stored positions per particle (trail length in frames); set before reset(). */
+  trailLen = TRAIL;
+  /** History in scene coords: trail[(p * trailLen + k) * 3], k = 0 is the newest. */
   trail = new Float32Array(0);
   private uvw = new Float32Array(3);
 
@@ -118,7 +127,7 @@ export class ParticleSystem {
     this.maxAge = new Float32Array(n);
     this.alive = new Uint8Array(n);
     this.still = new Float32Array(n);
-    this.trail = new Float32Array(n * TRAIL * 3);
+    this.trail = new Float32Array(n * this.trailLen * 3);
     for (let i = 0; i < n; i++) {
       this.level[i] = levels[i % levels.length];
       this.cell[i] = Math.floor(i / levels.length);
@@ -140,7 +149,7 @@ export class ParticleSystem {
     const { domain } = ctx;
     this.age[i] = 0;
     this.still[i] = 0;
-    this.maxAge[i] = 2 + Math.random() * 4; // seconds
+    this.maxAge[i] = this.life.min + Math.random() * this.life.span; // seconds
     const c = this.cells?.[this.cell[i]];
     for (let tries = 0; tries < 30; tries++) {
       const x = c ? c.x0 + Math.random() * (c.x1 - c.x0) : Math.random() * domain.width;
@@ -162,8 +171,9 @@ export class ParticleSystem {
     const X = ctx.domain.sceneX(this.x[i]);
     const Y = (this.heightM[i] / 1000) * ctx.exaggeration;
     const Z = ctx.domain.sceneZ(this.y[i]);
-    const base = i * TRAIL * 3;
-    for (let k = 0; k < TRAIL; k++) {
+    const L = this.trailLen;
+    const base = i * L * 3;
+    for (let k = 0; k < L; k++) {
       this.trail[base + k * 3] = X;
       this.trail[base + k * 3 + 1] = Y;
       this.trail[base + k * 3 + 2] = Z;
@@ -173,8 +183,7 @@ export class ParticleSystem {
   /**
    * Track how long particle i, at height `z` (m) over ground `ground` (m), has sat near a
    * mountain top moving slower than STILL_FRAC of the domain per second (`kmPerSec`, in
-   * scene km, vertical exaggerated), and once that passes STILL_TIME fade it
-   * out within FADE_OUT. Its lifetime is rescaled so the fade continues from its current
+   * scene km), and once that passes stillFade.stillTime fade it out within stillFade.fadeOut. Its lifetime is rescaled so the fade continues from its current
    * brightness (the renderer fades by min(1, 3·age, 4·(1 − age/maxAge))).
    */
   private checkStill(i: number, kmPerSec: number, dtReal: number, z: number, ground: number, ctx: AdvectionContext): void {
@@ -183,10 +192,11 @@ export class ParticleSystem {
     const slow = nearTop && kmPerSec < STILL_FRAC * Math.max(domain.width, domain.depth);
     this.still[i] = slow ? this.still[i] + dtReal : 0;
     const left = this.maxAge[i] - this.age[i];
-    if (this.still[i] < STILL_TIME || left <= FADE_OUT) return;
+    const { stillTime, fadeOut } = this.stillFade;
+    if (this.still[i] < stillTime || left <= fadeOut) return;
     const f = Math.max(0.05, Math.min(1, this.age[i] * 3, (left / this.maxAge[i]) * 4));
-    this.maxAge[i] = (4 * FADE_OUT) / f;
-    this.age[i] = this.maxAge[i] - FADE_OUT;
+    this.maxAge[i] = (4 * fadeOut) / f;
+    this.age[i] = this.maxAge[i] - fadeOut;
   }
 
   step(dtReal: number, ctx: AdvectionContext): void {
@@ -225,8 +235,8 @@ export class ParticleSystem {
       this.y[i] = ny;
       this.heightM[i] = h;
       // shift history and write the new head
-      const base = i * TRAIL * 3;
-      tr.copyWithin(base + 3, base, base + (TRAIL - 1) * 3);
+      const base = i * this.trailLen * 3;
+      tr.copyWithin(base + 3, base, base + (this.trailLen - 1) * 3);
       tr[base] = domain.sceneX(nx);
       tr[base + 1] = (h / 1000) * ctx.exaggeration;
       tr[base + 2] = domain.sceneZ(ny);
@@ -257,16 +267,18 @@ export class ParticleSystem {
       const floor = terrain.at(domain.lat(ny), domain.lon(nx)) + FLOOR_AGL;
       // no higher than the top level: above it there is no data, only its wind held constant
       const ceiling = ctx.wind.manifest.variables.height.max;
-      const h = Math.min(Math.max(this.heightM[i] + uvw[2] * dt, floor), Math.max(ceiling, floor));
+      const h = Math.min(Math.max(this.heightM[i] + uvw[2] * (ctx.wBoost ?? 1) * dt, floor), Math.max(ceiling, floor));
       // the motion actually made (held at the floor: no sinking), vertical as drawn
-      const rise = ((h - this.heightM[i]) / 1000) * ctx.exaggeration;
+      // the motion actually made (held at the floor: no sinking), vertical as drawn unless
+      // only horizontal motion counts (colour shows horizontal speed: the blue dots)
       const run = Math.hypot(nx - this.x[i], ny - this.y[i]);
+      const rise = this.stillFade.horizontal ? 0 : ((h - this.heightM[i]) / 1000) * ctx.exaggeration;
       if (dtReal > 0) this.checkStill(i, Math.hypot(run, rise) / dtReal, dtReal, h, floor - FLOOR_AGL, ctx);
       this.x[i] = nx;
       this.y[i] = ny;
       this.heightM[i] = h;
-      const base = i * TRAIL * 3;
-      tr.copyWithin(base + 3, base, base + (TRAIL - 1) * 3);
+      const base = i * this.trailLen * 3;
+      tr.copyWithin(base + 3, base, base + (this.trailLen - 1) * 3);
       tr[base] = domain.sceneX(nx);
       tr[base + 1] = (h / 1000) * ctx.exaggeration;
       tr[base + 2] = domain.sceneZ(ny);

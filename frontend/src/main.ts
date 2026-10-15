@@ -151,19 +151,15 @@ const onDataChange = (e?: Event) => {
 datasetSel.addEventListener('change', onDataChange);
 terrainSel.addEventListener('change', onDataChange);
 
-/**
- * Flow speed and vertical exaggeration suited to the domain size: the defaults (×300, ×4) are
- * for the ~50 km forecast domain; a 6 km CFD box needs slower particles and less stretch.
- */
+/** Flow speed and vertical exaggeration suited to the domain size (Domain.viewDefaults). */
 function applyDomainDefaults(domain: Domain): void {
-  const scale = Math.max(domain.width, domain.depth) / 52;
   const set = (id: string, v: number) => {
     const inp = $<HTMLInputElement>(`#${id}`);
     inp.value = String(v);
     inp.dispatchEvent(new Event('input'));
   };
-  set('flow-speed', Math.max(10, Math.round((300 * scale) / 5) * 5));
-  set('exaggeration', Math.min(4, Math.max(1, Math.round(8 * Math.sqrt(scale)) / 2)));
+  set('flow-speed', domain.viewDefaults.flowSpeed);
+  set('exaggeration', domain.viewDefaults.exaggeration);
 }
 
 // ---------------------------------------------------------------- helpers

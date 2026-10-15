@@ -60,6 +60,19 @@ export class Domain {
     return Math.max(this.width, this.depth) / 52;
   }
 
+  /**
+   * Flow speed (simulated s per real s) and vertical exaggeration suited to the domain size:
+   * ×300 and ×4 for the ~50 km forecast domain; a 6 km CFD box needs slower particles and
+   * less stretch.
+   */
+  get viewDefaults(): { flowSpeed: number; exaggeration: number } {
+    const s = this.scale;
+    return {
+      flowSpeed: Math.max(10, Math.round((300 * s) / 5) * 5),
+      exaggeration: Math.min(4, Math.max(1, Math.round(8 * Math.sqrt(s)) / 2)),
+    };
+  }
+
   static fromGrid(g: RegularGrid): Domain {
     return new Domain(g.latMin, g.latMax, g.lonMin, g.lonMax);
   }

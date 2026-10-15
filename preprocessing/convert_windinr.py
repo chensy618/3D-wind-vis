@@ -59,6 +59,10 @@ SURFACE_AGL = 10.0
 Z_LOG_AGL = 25.0
 Z0 = 0.1  # roughness length of the senja_v1 CFD cases
 N_LR = 7  # background grid of the training data (proportional 1 km bins over the terrain extent)
+# Resolution behind the senja_v1/v3 checkpoint, for the viewers (manifest "training"): its 10 m
+# terrain input and the case_senja CFD mesh it learned from (100 m blocks, refined to 25 m at
+# the terrain by snappyHexMesh level 2).
+TRAINING = {"terrain_m": 10, "cfd_m": 100, "cfd_near_terrain_m": 25}
 
 
 def load_driver(web: Path, driver: str):
@@ -218,7 +222,7 @@ def export(args) -> None:
     export_web(ds, out)
     mm = json.loads((out / "manifest.json").read_text())
     mm.update(label=f"WindINR × {m['model']} · {init.replace('T', ' ')}Z", level_units="m ASL", group="WindINR × forecast · CFD box",
-              terrain=args.terrain_id, driver=args.driver)
+              terrain=args.terrain_id, driver=args.driver, training=TRAINING)
     (out / "manifest.json").write_text(json.dumps(mm, indent=1))
     from common_schema import update_index
     update_index(out.parent)

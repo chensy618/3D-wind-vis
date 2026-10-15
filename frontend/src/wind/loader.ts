@@ -23,6 +23,8 @@ export interface WindManifest {
   level_units?: string;
   /** Terrain id this dataset's domain was built on (e.g. a CFD box); the viewers switch to it. */
   terrain?: string;
+  /** WindINR: resolution of what the model learned from (terrain input, CFD mesh), metres. */
+  training?: { terrain_m: number; cfd_m: number; cfd_near_terrain_m?: number };
 }
 
 /** "850 hPa" or "300 m ASL". */

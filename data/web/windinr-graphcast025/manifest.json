@@ -275,5 +275,10 @@
  "level_units": "m ASL",
  "group": "WindINR \u00d7 forecast \u00b7 CFD box",
  "terrain": "terrain-cfd-senja",
- "driver": "graphcast025"
+ "driver": "graphcast025",
+ "training": {
+  "terrain_m": 10,
+  "cfd_m": 100,
+  "cfd_near_terrain_m": 25
+ }
 }
