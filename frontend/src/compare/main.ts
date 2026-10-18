@@ -485,7 +485,7 @@ function popupHtml(wind: WindField, tw: TimeWeights, lat: number, lon: number, g
     const u = wind.sample(wind.u, tw, k, lat, lon);
     const v = wind.sample(wind.v, tw, k, lat, lon);
     const w = withW && wind.w ? wind.sample(wind.w, tw, k, lat, lon) : null;
-    const ws = w == null ? '' : ` · <span class="k">w</span> ${w >= 0 ? '+' : '−'}${Math.abs(w).toFixed(1)}`;
+    const ws = w == null ? '' : ` · <span class="k">w</span> ${w >= 0 ? '+' : '−'}${Math.abs(w).toFixed(1)} m/s`;
     return `${head} · <b>${Math.hypot(u, v).toFixed(1)} m/s</b> from ${windFromLabel(u, v)}${ws}`;
   };
   if (!state.all) return line(state.level, true);
