@@ -32,6 +32,25 @@ export function windFrom(u: number, v: number): number {
   return (Math.atan2(-u, -v) * (180 / Math.PI) + 360) % 360;
 }
 
+/**
+ * Quadrant name and the angle into it, clockwise from its first edge (N, E, S or W):
+ * e.g. 242° -> "SW 62°"; the four cardinal directions are just "N", "E", "S", "W".
+ */
+export function quadrant(deg: number): string {
+  const d = Math.round(((deg % 360) + 360) % 360) % 360;
+  if (d % 90 === 0) return ['N', 'E', 'S', 'W'][d / 90];
+  return `${['NE', 'SE', 'SW', 'NW'][Math.floor(d / 90)]} ${d % 90}°`;
+}
+
+/** "SW 62° ↗": quadrant direction the wind comes from, and a small arrow pointing where it blows (north up). */
+export function windFromLabel(u: number, v: number): string {
+  const from = windFrom(u, v);
+  return (
+    `${quadrant(from)} <svg class="dir-arrow" viewBox="0 0 16 26" style="transform:rotate(${from + 180}deg)" aria-hidden="true">` +
+    '<path class="shaft" d="M6.4 7.2H9.6L8.55 24.6Q8 25.2 7.45 24.6Z"/><path class="head" d="M8 1.2 13 8.4 8 6.6 3 8.4Z"/></svg>'
+  );
+}
+
 const f1 = (x: number) => x.toFixed(1);
 const signed = (x: number) => `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(1)}`;
 

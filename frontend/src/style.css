@@ -100,6 +100,9 @@ button.wide { width: 100%; }
 .profile tr.surf td { border-top: 1px dashed var(--border); color: var(--muted); }
 .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .arrow { display: inline-block; margin-right: 4px; }
+.dir-arrow { width: 1.05em; height: 1.71em; vertical-align: -0.5em; margin-left: 2px; }
+.dir-arrow .shaft { fill: currentColor; stroke: currentColor; stroke-width: 0.4; stroke-linejoin: round; }
+.dir-arrow .head { fill: currentColor; stroke: currentColor; stroke-width: 0.8; stroke-linejoin: round; }
 .note { color: var(--muted); font-size: 11px; margin: 8px 0 0; }
 
 #legend { right: 16px; bottom: 96px; width: 270px; }
@@ -131,6 +134,7 @@ button.wide { width: 100%; }
 .label3d.north { font-weight: 700; color: #fff; font-size: 13px; }
 .label3d.grid { color: #ffd166; font-weight: 600; }
 .label3d.ten { color: #fff; font-weight: 600; background: rgba(11, 19, 32, 0.75); padding: 2px 6px; border-radius: 4px; }
+.label3d.fc-arrow { color: #fff; font-size: 13px; text-align: center; background: rgba(11, 19, 32, 0.75); padding: 3px 8px; border-radius: 5px; }
 
 #loading {
   z-index: 3;
@@ -213,6 +217,8 @@ button.wide { width: 100%; }
   font-variant-numeric: tabular-nums; color: var(--text); text-shadow: none;
 }
 .cmp-pop .k { color: var(--muted); }
+.cmp-where { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cmp-where b { color: var(--text); font-weight: 600; }
 .cmp-bar {
   top: 12px; left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 14px; padding: 7px 12px; white-space: nowrap;

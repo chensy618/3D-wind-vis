@@ -9,7 +9,9 @@ import { Highlight } from '../scene/highlight';
 import { LevelSurface } from '../scene/levels';
 import { ParticleRenderer } from '../scene/particles';
 import { buildDomainFrame, buildTerrainMesh } from '../scene/terrain';
-import { windFrom } from '../ui/inspector';
+import { GridOverlay } from '../surface/overlays';
+import { ForecastArrows } from './forecastArrows';
+import { windFromLabel } from '../ui/inspector';
 import { renderLegend } from '../ui/legend';
 import { Timeline } from '../ui/timeline';
 import { AdvectionContext, ParticleSystem } from '../wind/advection';
@@ -26,12 +28,11 @@ import { loadIndex, loadTerrain, loadWind, loadWindManifest, Terrain, WindField 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
 /**
- * Particles per view. The raw forecast gets far fewer: one or two native grid points cover the
- * box, so it is drawn sparse next to the dense WindINR field. Its particles also live longer,
- * so they visibly glide across the level (horizontal wind only) instead of popping in and out.
+ * Particles per view, the same in both so they compare like for like. The raw forecast's
+ * particles live longer, so they visibly glide across the level (horizontal wind only) instead
+ * of popping in and out.
  */
-const N_PARTICLES_RAW = 300;
-const N_PARTICLES_INR = 4000;
+const N_PARTICLES = 4000;
 const LIFE_RAW = { min: 8, span: 6 }; // seconds; WindINR keeps the default 2-6 s
 /** WindINR particles rise and sink with this many times w (display only; values shown are true w). */
 const W_BOOST = 3;
@@ -81,11 +82,17 @@ class Pane {
   private terrainMesh: THREE.Mesh | null = null;
   private surfaces: LevelSurface[] = [];
   private annotations: Annotations | null = null;
+  /** grid lines draped over the terrain */
+  private readonly gridOverlay = new GridOverlay();
+  /** one big arrow per native forecast cell (raw pane only) */
+  private readonly arrows: ForecastArrows | null;
 
   constructor(
     readonly root: HTMLElement,
     private readonly nParticles: number,
-    life?: { min: number; span: number },
+    life: { min: number; span: number } | undefined,
+    /** native: the forecast model's own grid (from native_deg). cfd: WindINR's CFD training resolution. */
+    private readonly grid: 'native' | 'cfd',
   ) {
     if (life) this.ps.life = life;
     this.ps.stillFade = STILL_FADE;
@@ -104,7 +111,9 @@ class Pane {
     this.popup = new CSS2DObject(pop);
     this.popup.center.set(0.5, 1);
     this.popup.visible = false;
-    this.scene.add(sun, this.particles.group, this.marker.group, this.highlight.group, this.popup);
+    this.scene.add(sun, this.particles.group, this.marker.group, this.highlight.group, this.popup, this.gridOverlay.group);
+    this.arrows = grid === 'native' ? new ForecastArrows() : null;
+    if (this.arrows) this.scene.add(this.arrows.group);
   }
 
   showPopup(x: number, y: number, z: number, html: string): void {
@@ -165,9 +174,14 @@ class Pane {
   }
 
   /** Rebuild what depends on the vertical exaggeration. */
-  applyExaggeration(domain: Domain): void {
+  applyExaggeration(terrain: Terrain, domain: Domain): void {
     if (!this.wind || !this.content || !this.terrainMesh || !this.annotations) return;
     const w = this.wind;
+    if (this.grid === 'native' && w.manifest.native_deg) {
+      this.gridOverlay.build('native', w.manifest.native_deg, w.manifest.model.replace(/\s*\(native\)$/, ''), null, terrain, domain, state.exaggeration, 2);
+    } else if (this.grid === 'cfd' && w.manifest.training) {
+      this.gridOverlay.buildRegular(w.manifest.training.cfd_m / 1000, terrain, domain, state.exaggeration);
+    }
     this.terrainMesh.scale.y = state.exaggeration;
     const top = w.manifest.variables.height.max + 500;
     this.content.getObjectByName('domain-frame')?.removeFromParent();
@@ -215,6 +229,10 @@ class Pane {
   }
 
   updateSurfaces(terrain: Terrain, tw: TimeWeights, maxSpeed: number): void {
+    if (this.arrows && this.wind && shared) {
+      const shown = this.wind.levels.map((_, i) => i).filter(isShown);
+      this.arrows.update(this.wind, shared.domain, tw, shown, state.exaggeration, maxSpeed);
+    }
     this.surfaces.forEach((s, i) => {
       // a surface per level on show; fainter when all levels are stacked
       const show = state.showSurface && isShown(i);
@@ -250,14 +268,21 @@ function resolution(wind: WindField, domain: Domain): string {
   return `${deg}° ≈ ${km(ew)} × ${km(ns)} km (E–W = ${km(ns)} km × cos ${lat.toFixed(1)}°)`;
 }
 
+/** Short note on where the box is: place and centre. */
+function whereText(d: Domain): string {
+  const lat = (d.latMin + d.latMax) / 2;
+  const lon = (d.lonMin + d.lonMax) / 2;
+  return `<b>Northern Senja</b> · ${lat.toFixed(2)}° N, ${lon.toFixed(2)}° E`;
+}
+
 /** Is level i on show (the chosen one, or every level in all-levels mode)? */
 function isShown(i: number): boolean {
   return state.all || i === state.level;
 }
 
 const raycaster = new THREE.Raycaster();
-const paneRaw = new Pane($('#pane-raw'), N_PARTICLES_RAW, LIFE_RAW);
-const paneInr = new Pane($('#pane-inr'), N_PARTICLES_INR);
+const paneRaw = new Pane($('#pane-raw'), N_PARTICLES, LIFE_RAW, 'native');
+const paneInr = new Pane($('#pane-inr'), N_PARTICLES, undefined, 'cfd');
 const panes = [paneRaw, paneInr];
 
 let pairs: Pair[] = [];
@@ -393,6 +418,7 @@ async function load(driver: string): Promise<void> {
       flowInp.value = String(state.speedFactor);
       showFlow();
     }
+    $('#where').innerHTML = whereText(shared.domain);
     // one colour scale for both, so equal colours mean equal speeds
     shared.maxSpeed = niceMax(Math.max(raw.manifest.variables.wind_speed.max, inr.manifest.variables.wind_speed.max));
     const { terrain, domain } = shared;
@@ -402,11 +428,11 @@ async function load(driver: string): Promise<void> {
     const tr = inr.manifest.training;
     paneInr.setTag(
       inr.manifest.model,
-      tr ? `Terrain ${tr.terrain_m} m · CFD ${tr.cfd_m} m` : '',
+      tr ? `Terrain ${tr.terrain_m} m | CFD ${tr.cfd_m} m (grid lines)` : '',
     );
     for (const p of panes) {
       p.resize();
-      p.applyExaggeration(domain);
+      p.applyExaggeration(terrain, domain);
     }
     const m = inr.manifest;
     state.level = Math.min(state.level, m.levels.length - 1);
@@ -460,7 +486,7 @@ function popupHtml(wind: WindField, tw: TimeWeights, lat: number, lon: number, g
     const v = wind.sample(wind.v, tw, k, lat, lon);
     const w = withW && wind.w ? wind.sample(wind.w, tw, k, lat, lon) : null;
     const ws = w == null ? '' : ` · <span class="k">w</span> ${w >= 0 ? '+' : '−'}${Math.abs(w).toFixed(1)}`;
-    return `${head} · <b>${Math.hypot(u, v).toFixed(1)} m/s</b> from ${Math.round(windFrom(u, v))}°${ws}`;
+    return `${head} · <b>${Math.hypot(u, v).toFixed(1)} m/s</b> from ${windFromLabel(u, v)}${ws}`;
   };
   if (!state.all) return line(state.level, true);
   return wind.levels
