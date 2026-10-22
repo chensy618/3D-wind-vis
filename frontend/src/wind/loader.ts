@@ -27,11 +27,6 @@ export interface WindManifest {
   training?: { terrain_m: number; cfd_m: number; cfd_near_terrain_m?: number };
 }
 
-/** "850 hPa" or "300 m ASL". */
-export function levelLabel(m: WindManifest, level: number): string {
-  return `${level} ${m.level_units ?? 'hPa'}`;
-}
-
 export interface TerrainManifest {
   source: string;
   shape: [number, number];
@@ -64,17 +59,6 @@ export function datasetOptions(entries: { id: string; label: string; group?: str
     html += `<option value="${d.id}">${d.label}</option>`;
   }
   return open !== undefined ? `${html}</optgroup>` : html;
-}
-
-/**
- * The terrain to show with a dataset: its own terrain if it has one, otherwise the current
- * choice, unless that is another dataset's own terrain (a small CFD box), then the default.
- */
-export function terrainFor(index: DataIndex, datasetId: string, current: string, fallback = 'terrain'): string {
-  const own = index.datasets.find((d) => d.id === datasetId)?.terrain;
-  if (own && index.terrains.some((t) => t.id === own)) return own;
-  const scoped = new Set(index.datasets.map((d) => d.terrain).filter(Boolean));
-  return scoped.has(current) ? (index.terrains.find((t) => t.id === fallback)?.id ?? current) : current;
 }
 
 export interface DataIndex {

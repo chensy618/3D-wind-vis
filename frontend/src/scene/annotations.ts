@@ -63,6 +63,7 @@ export class Annotations {
     this.group.add(n);
   }
 
+  /** `active[i]`: level i is on show, so its tag gets the accent look. */
   highlight(active: boolean[]): void {
     this.levelTags.forEach((l, i) => l.element.classList.toggle('on', active[i]));
   }

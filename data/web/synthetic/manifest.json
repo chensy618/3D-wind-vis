@@ -195,5 +195,6 @@
    "max": 1.4848116636276245
   }
  },
- "native_deg": 0.25
+ "native_deg": 0.25,
+ "terrain": "terrain-synthetic"
 }

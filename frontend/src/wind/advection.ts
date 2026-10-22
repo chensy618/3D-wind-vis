@@ -9,6 +9,13 @@ export const TRAIL = 35;
 const GROUND_CLEARANCE = 30;
 /** With vertical motion, the lowest a particle may sink (m above ground): the 10 m wind's height. */
 const FLOOR_AGL = 10;
+
+/**
+ * `ParticleSystem.level` value for the 10 m above-ground wind. Callers must only put it into a
+ * `levels` array when the dataset has `u10`/`v10`, and datasets must stay below this many levels.
+ */
+export const SURFACE_LEVEL = 255;
+
 /**
  * Near the mountain tops (within NEAR_GROUND_M of the ground, where the ground is above
  * SUMMIT_FRAC of the highest terrain), a particle that moves less than STILL_FRAC of the
@@ -141,8 +148,10 @@ export class ParticleSystem {
     const { domain, wind, terrain, tw } = ctx;
     const lat = domain.lat(y);
     const lon = domain.lon(x);
+    const ground = terrain.at(lat, lon);
+    if (this.level[i] === SURFACE_LEVEL) return ground + FLOOR_AGL;
     const h = wind.sample(wind.height, tw, this.level[i], lat, lon);
-    return h > terrain.at(lat, lon) + GROUND_CLEARANCE ? h : NaN;
+    return h > ground + GROUND_CLEARANCE ? h : NaN;
   }
 
   respawn(i: number, ctx: AdvectionContext): void {
@@ -216,8 +225,9 @@ export class ParticleSystem {
       const lev = this.level[i];
       const lat = domain.lat(this.y[i]);
       const lon = domain.lon(this.x[i]);
-      const u = wind.sample(wind.u, tw, lev, lat, lon);
-      const v = wind.sample(wind.v, tw, lev, lat, lon);
+      const on10m = lev === SURFACE_LEVEL;
+      const u = on10m ? wind.sampleSurface(wind.u10!, tw, lat, lon) : wind.sample(wind.u, tw, lev, lat, lon);
+      const v = on10m ? wind.sampleSurface(wind.v10!, tw, lat, lon) : wind.sample(wind.v, tw, lev, lat, lon);
       this.speed[i] = Math.sqrt(u * u + v * v);
       this.checkStill(i, (this.speed[i] * ctx.speedFactor) / 1000, dtReal, this.heightM[i], ctx.terrain.at(lat, lon), ctx);
       const nx = this.x[i] + u * dtKm;
@@ -265,9 +275,11 @@ export class ParticleSystem {
         continue;
       }
       const floor = terrain.at(domain.lat(ny), domain.lon(nx)) + FLOOR_AGL;
-      // no higher than the top level: above it there is no data, only its wind held constant
       const ceiling = ctx.wind.manifest.variables.height.max;
-      const h = Math.min(Math.max(this.heightM[i] + uvw[2] * (ctx.wBoost ?? 1) * dt, floor), Math.max(ceiling, floor));
+      const h =
+        this.level[i] === SURFACE_LEVEL
+          ? floor // the 10 m layer follows the ground; w does not lift it off
+          : Math.min(Math.max(this.heightM[i] + uvw[2] * (ctx.wBoost ?? 1) * dt, floor), Math.max(ceiling, floor));
       // the motion actually made (held at the floor: no sinking), vertical as drawn
       // the motion actually made (held at the floor: no sinking), vertical as drawn unless
       // only horizontal motion counts (colour shows horizontal speed: the blue dots)

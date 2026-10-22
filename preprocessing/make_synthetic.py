@@ -83,7 +83,8 @@ def main() -> None:
         attrs={
             "model": "Synthetic",
             "init_time": "synthetic",
-            "native_deg": 0.25,  # drawn on the surface page as a coarse, FCN3-like grid
+            "native_deg": 0.25,  # a coarse, FCN3-like grid
+            "terrain": "terrain-synthetic",  # this field goes with the synthetic terrain, not the DTM
             "description": "u = 5 + 2 sin(x), v = 3 cos(y); stronger and veering with height; "
                            "10 m wind 0.7x and backed 15 deg",
         },

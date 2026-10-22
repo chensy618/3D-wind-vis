@@ -18,13 +18,11 @@
         </section>
       </div>
 
+      <nav class="panel view-switch" id="views" aria-label="Views"></nav>
+
       <header class="panel cmp-bar">
-        <a class="cmp-back" href="./index.html">← 3D viewer</a>
         <label class="cmp-field">Model <select id="model" aria-label="Forecast model"></select></label>
-        <div class="seg cmp-levels" id="levels" role="radiogroup" aria-label="Level"></div>
-        <label class="cmp-field" title="Simulated seconds per real second">Flow speed
-          <input id="flow-speed" type="range" min="5" max="200" step="5" value="30" aria-label="Flow speed" />
-          <output id="flow-speed-out"></output></label>
+        <div class="seg cmp-levels" id="levels" role="group" aria-label="Levels"></div>
         <label class="check"><input id="show-surface" type="checkbox" checked /> Level surface</label>
         <button id="reset-camera">Reset camera</button>
         <span class="cmp-where" id="where"></span>

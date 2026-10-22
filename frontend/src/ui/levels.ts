@@ -1,85 +1,57 @@
-export type LevelMode = 'single' | 'multi';
+import { SURFACE_LEVEL } from '../wind/advection';
+
+/** What to render for the 10 m above-ground wind; omitted when the caller has no such concept. */
+export interface SurfaceOption {
+  /** the dataset has a 10 m wind (u10/v10); false renders the row greyed out and unselectable */
+  available: boolean;
+  checked: boolean;
+}
 
 /**
- * Vertical level selector: one or more chosen levels (Mode A, each with its own
- * level surface) or all levels stacked (Mode B). At least one level stays chosen.
+ * One checkbox per pressure/height level, highest level on top, then the 10 m surface wind. All
+ * boxes start checked. Unchecking the last remaining layer is refused, so at least one layer always
+ * stays on. `onChange` receives the checked pressure-level indices (ascending) and whether the 10 m
+ * layer is on.
  */
-export class LevelSelector {
-  private list: HTMLElement;
-  private mode: LevelMode = 'single';
-  private selected = new Set<number>();
-
-  constructor(
-    private root: HTMLElement,
-    private onChange: (mode: LevelMode, levels: number[]) => void,
-  ) {
-    root.innerHTML = `
-      <div class="seg" role="radiogroup" aria-label="Level mode">
-        <button data-mode="single" class="on">Selected levels</button>
-        <button data-mode="multi">All levels</button>
-      </div>
-      <div class="level-list" role="group" aria-label="Levels"></div>`;
-    this.list = root.querySelector('.level-list')!;
-    root.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) =>
-      b.addEventListener('click', () => this.setMode(b.dataset.mode as LevelMode)),
-    );
+export function renderLevelPicker(
+  root: HTMLElement,
+  levels: number[],
+  heights: number[],
+  onChange: (selected: number[], surface: boolean) => void,
+  unit = 'hPa',
+  surface?: SurfaceOption,
+): void {
+  const order = levels.map((_, i) => i).sort((a, b) => heights[b] - heights[a]);
+  const rows = order.map(
+    (i) => `
+      <label class="level-row">
+        <input type="checkbox" value="${i}" checked />
+        <span class="lv-p">${levels[i]} ${unit}</span>
+        <span class="lv-h">≈ ${(heights[i] / 1000).toFixed(2)} km</span>
+      </label>`,
+  );
+  if (surface) {
+    rows.push(`
+      <label class="level-row${surface.available ? '' : ' off'}" title="${surface.available ? '' : 'This dataset has no 10 m wind'}">
+        <input type="checkbox" value="${SURFACE_LEVEL}"${surface.available ? '' : ' disabled'}${surface.checked && surface.available ? ' checked' : ''} />
+        <span class="lv-p">10 m AGL</span>
+        <span class="lv-h">surface wind</span>
+      </label>`);
   }
-
-  /** Chosen level indices, ascending. */
-  get levels(): number[] {
-    return [...this.selected].sort((a, b) => a - b);
-  }
-
-  /** @param levels in `unit` (hPa or m AGL), @param heights mean height (m) per level */
-  setLevels(levels: number[], heights: number[], selected: number[], unit = 'hPa'): void {
-    this.selected = new Set(selected);
-    // highest level on top
-    const order = levels.map((_, i) => i).sort((a, b) => heights[b] - heights[a]);
-    this.list.innerHTML = order
-      .map(
-        (i) => `
-        <label class="level-row">
-          <input type="checkbox" value="${i}" ${this.selected.has(i) ? 'checked' : ''} />
-          <span class="lv-p">${levels[i]} ${unit}</span>
-          <span class="lv-h">≈ ${(heights[i] / 1000).toFixed(2)} km</span>
-        </label>`,
-      )
-      .join('');
-    this.list.querySelectorAll<HTMLInputElement>('input').forEach((inp) =>
-      inp.addEventListener('change', () => {
-        const i = parseInt(inp.value, 10);
-        if (this.mode === 'multi') {
-          // picking a level in all-levels mode starts a selection with just that level
-          this.selected = new Set([i]);
-          this.syncChecks();
-          this.setMode('single');
-          return;
-        }
-        if (inp.checked) this.selected.add(i);
-        else if (this.selected.size > 1) this.selected.delete(i);
-        else inp.checked = true; // keep at least one level
-        this.onChange(this.mode, this.levels);
-      }),
-    );
-    this.render();
-  }
-
-  setMode(mode: LevelMode): void {
-    this.mode = mode;
-    this.render();
-    this.onChange(mode, this.levels);
-  }
-
-  private syncChecks(): void {
-    this.list.querySelectorAll<HTMLInputElement>('input').forEach((inp) => {
-      inp.checked = this.selected.has(parseInt(inp.value, 10));
+  root.innerHTML = rows.join('');
+  const boxes = [...root.querySelectorAll<HTMLInputElement>('input')].filter((b) => !b.disabled);
+  for (const box of boxes) {
+    box.addEventListener('change', () => {
+      const selected = boxes
+        .filter((b) => b.checked && Number(b.value) !== SURFACE_LEVEL)
+        .map((b) => parseInt(b.value, 10))
+        .sort((a, b) => a - b);
+      const on10m = boxes.some((b) => b.checked && Number(b.value) === SURFACE_LEVEL);
+      if (!selected.length && !on10m) {
+        box.checked = true; // keep at least one layer on
+        return;
+      }
+      onChange(selected, on10m);
     });
-  }
-
-  private render(): void {
-    this.root.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) =>
-      b.classList.toggle('on', b.dataset.mode === this.mode),
-    );
-    this.list.classList.toggle('dim', this.mode === 'multi');
   }
 }

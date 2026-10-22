@@ -6,33 +6,36 @@ import { Domain } from './geo';
 import { Annotations, ProbeMarker } from './scene/annotations';
 import { CameraRig, createCamera } from './scene/camera';
 import { Highlight } from './scene/highlight';
-import { LevelSurface } from './scene/levels';
+import { LevelSurface, SurfaceLayer } from './scene/levels';
 import { ParticleRenderer } from './scene/particles';
 import { buildDomainFrame, buildTerrainMesh } from './scene/terrain';
 import { Inspector, ProbeRow } from './ui/inspector';
 import { renderLegend } from './ui/legend';
-import { LevelMode, LevelSelector } from './ui/levels';
+import { renderLevelPicker } from './ui/levels';
 import { PointQuery } from './ui/query';
 import { Timeline } from './ui/timeline';
-import { AdvectionContext, ParticleSystem } from './wind/advection';
+import { renderViewSwitcher } from './ui/viewSwitcher';
+import { AdvectionContext, ParticleSystem, SURFACE_LEVEL } from './wind/advection';
 import { timeWeights, TimeWeights } from './wind/interpolation';
-import { DataIndex, datasetOptions, levelLabel, loadIndex, loadTerrain, loadWind, Terrain, terrainFor, WindField } from './wind/loader';
+import { DataIndex, datasetOptions, loadIndex, loadTerrain, loadWind, Terrain, WindField } from './wind/loader';
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
 // ---------------------------------------------------------------- state
+/** Vertical exaggeration is fixed (no slider). */
+const EXAGGERATION = 1;
+
 const state = {
   t: 0,
   playing: false,
   rate: 1, // forecast hours per second
   smooth: true, // temporal interpolation between forecast steps
-  mode: 'single' as LevelMode,
-  levels: [2], // chosen level indices in Mode A
   nParticles: 4000,
   speedFactor: 300, // simulated seconds per real second for particle motion
-  exaggeration: 4,
   showSurface: true,
   vertical: true, // move particles with w when the dataset has it
+  levels: [] as number[], // shown level indices, ascending; all of them by default
+  surfaceLayer: true, // the dataset's 10 m wind is on show (only when it has u10/v10)
 };
 
 interface Loaded {
@@ -45,6 +48,8 @@ interface Loaded {
   terrainMesh: THREE.Mesh;
   /** one level surface per pressure level, shown for the chosen levels */
   surfaces: LevelSurface[];
+  /** the draped 10 m surface, when the dataset has u10/v10 */
+  surfaceMesh: SurfaceLayer | null;
   annotations: Annotations;
 }
 
@@ -84,13 +89,6 @@ const timeline = new Timeline($('#timeline'), {
   onPlay: (p) => (state.playing = p),
   onRate: (r) => (state.rate = r),
 });
-const levelSel = new LevelSelector($('#levels'), (mode, levels) => {
-  state.mode = mode;
-  state.levels = levels;
-  resetParticles();
-  surfaceDirty = true;
-  lastProbeT = -1;
-});
 const inspector = new Inspector($('#inspector'), () => {
   probe = null;
   inspector.hide();
@@ -104,27 +102,7 @@ const query = new PointQuery($('#query'), (lat, lon) => {
   lastProbeT = -1;
 });
 
-function bindRange(id: string, fmt: (v: number) => string, apply: (v: number) => void): void {
-  const inp = $<HTMLInputElement>(`#${id}`);
-  const out = $(`#${id}-out`);
-  const upd = () => {
-    const v = parseFloat(inp.value);
-    out.textContent = fmt(v);
-    apply(v);
-  };
-  inp.addEventListener('input', upd);
-  out.textContent = fmt(parseFloat(inp.value));
-}
-
-bindRange('n-particles', (v) => v.toLocaleString('en'), (v) => {
-  state.nParticles = v;
-  resetParticles();
-});
-bindRange('flow-speed', (v) => `×${v}`, (v) => (state.speedFactor = v));
-bindRange('exaggeration', (v) => `×${v}`, (v) => {
-  state.exaggeration = v;
-  applyExaggeration();
-});
+renderViewSwitcher($('#views'), 'viewer');
 $<HTMLInputElement>('#show-surface').addEventListener('change', (e) => {
   state.showSurface = (e.target as HTMLInputElement).checked;
   surfaceDirty = true;
@@ -141,35 +119,21 @@ $<HTMLInputElement>('#smooth').addEventListener('change', (e) => {
 $('#reset-camera').addEventListener('click', () => rig?.reset());
 
 const datasetSel = $<HTMLSelectElement>('#dataset');
-const terrainSel = $<HTMLSelectElement>('#terrain');
-const onDataChange = (e?: Event) => {
-  if (index && e?.target === datasetSel) terrainSel.value = terrainFor(index, datasetSel.value, terrainSel.value);
-  const q = new URLSearchParams({ data: datasetSel.value, terrain: terrainSel.value });
+const onDataChange = () => {
+  const q = new URLSearchParams({ data: datasetSel.value });
   history.replaceState(null, '', `?${q}`);
-  void load(datasetSel.value, terrainSel.value);
+  void load(datasetSel.value);
 };
 datasetSel.addEventListener('change', onDataChange);
-terrainSel.addEventListener('change', onDataChange);
 
-/** Flow speed and vertical exaggeration suited to the domain size (Domain.viewDefaults). */
-function applyDomainDefaults(domain: Domain): void {
-  const set = (id: string, v: number) => {
-    const inp = $<HTMLInputElement>(`#${id}`);
-    inp.value = String(v);
-    inp.dispatchEvent(new Event('input'));
-  };
-  set('flow-speed', domain.viewDefaults.flowSpeed);
-  set('exaggeration', domain.viewDefaults.exaggeration);
+/** Flow speed suited to the domain size (Domain.viewDefaults). */
+function applyViewDefaults(domain: Domain): void {
+  state.speedFactor = domain.viewDefaults.flowSpeed;
 }
 
 // ---------------------------------------------------------------- helpers
 function currentTw(): TimeWeights {
   return timeWeights(data!.wind.times, state.t, state.smooth);
-}
-
-function activeLevels(): number[] {
-  if (!data) return [];
-  return state.mode === 'multi' ? data.wind.levels.map((_, i) => i) : state.levels;
 }
 
 function advCtx(): AdvectionContext {
@@ -180,18 +144,25 @@ function advCtx(): AdvectionContext {
     domain: d.domain,
     tw: currentTw(),
     speedFactor: state.speedFactor,
-    exaggeration: state.exaggeration,
+    exaggeration: EXAGGERATION,
     vertical: state.vertical,
   };
 }
 
 function resetParticles(): void {
   if (!data) return;
-  // Mode A: half the particle budget per chosen level, up to 1.5× the budget
-  const n = state.mode === 'multi' ? state.nParticles : Math.round((state.nParticles / 2) * Math.min(state.levels.length, 3));
-  ps.reset(n, activeLevels(), advCtx());
-  const active = data.wind.levels.map((_, i) => activeLevels().includes(i));
-  data.annotations.highlight(active);
+  ps.reset(state.nParticles, layerIndices(), advCtx());
+}
+
+/** Level indices to advect: the shown pressure levels, plus the 10 m layer when it is on. */
+function layerIndices(): number[] {
+  return state.surfaceLayer ? [...state.levels, SURFACE_LEVEL] : state.levels;
+}
+
+/** Accent the level tags of the levels on show. */
+function syncLevelTags(): void {
+  if (!data) return;
+  data.annotations.highlight(data.wind.levels.map((_, i) => state.levels.includes(i)));
 }
 
 function setTime(t: number): void {
@@ -204,17 +175,18 @@ function meanHeights(w: WindField): number[] {
   return w.levels.map((_, i) => w.meanHeight(i, 0));
 }
 
-function applyExaggeration(): void {
+function rebuildView(): void {
   if (!data) return;
-  data.terrainMesh.scale.y = state.exaggeration;
+  data.terrainMesh.scale.y = EXAGGERATION;
   const w = data.wind;
   const top = w.manifest.variables.height.max + 500;
   data.content.getObjectByName('domain-frame')?.removeFromParent();
-  data.content.add(buildDomainFrame(data.domain, (top / 1000) * state.exaggeration));
-  data.annotations.build(w.levels, meanHeights(w), state.exaggeration, top, w.manifest.level_units);
+  data.content.add(buildDomainFrame(data.domain, (top / 1000) * EXAGGERATION));
+  data.annotations.build(w.levels, meanHeights(w), EXAGGERATION, top, w.manifest.level_units);
   resetParticles();
   surfaceDirty = true;
   lastProbeT = -1;
+  syncLevelTags();
 }
 
 function disposeGroup(g: THREE.Object3D): void {
@@ -240,7 +212,9 @@ function showError(msg: string): void {
   el.textContent = msg;
 }
 
-async function load(datasetId: string, terrainId: string): Promise<void> {
+async function load(datasetId: string): Promise<void> {
+  // the dataset's own terrain when it pins one (it was built on that box), otherwise the default
+  const terrainId = index?.datasets.find((d) => d.id === datasetId)?.terrain ?? 'terrain';
   setLoading('Loading wind field and terrain…');
   $('#error').hidden = true;
   try {
@@ -256,8 +230,9 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
     const content = new THREE.Group();
     const terrainMesh = buildTerrainMesh(terrain, domain);
     const surfaces = wind.levels.map(() => new LevelSurface(wind, domain));
+    const surfaceMesh = wind.u10 && wind.v10 ? new SurfaceLayer(terrain, domain) : null;
     const annotations = new Annotations(domain);
-    content.add(terrainMesh, ...surfaces.map((s) => s.mesh), annotations.group);
+    content.add(terrainMesh, ...surfaces.map((s) => s.mesh), ...(surfaceMesh ? [surfaceMesh.mesh] : []), annotations.group);
     scene.add(content);
 
     data = {
@@ -269,6 +244,7 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
       content,
       terrainMesh,
       surfaces,
+      surfaceMesh,
       annotations,
     };
 
@@ -289,15 +265,31 @@ async function load(datasetId: string, terrainId: string): Promise<void> {
     vert.parentElement!.title = wind.w ? '' : 'This dataset has no vertical wind';
     renderLegend($('#legend'), data.maxSpeed);
 
-    state.levels = state.levels.filter((i) => i < m.levels.length);
-    if (!state.levels.length) state.levels = [Math.min(2, m.levels.length - 1)];
-    levelSel.setLevels(m.levels, meanHeights(wind), state.levels, m.level_units);
+    const has10m = !!(wind.u10 && wind.v10);
+    state.levels = m.levels.map((_, i) => i);
+    state.surfaceLayer = false; // the 10 m layer starts off; tick it to add the surface wind
+    renderLevelPicker(
+      $('#levels'),
+      m.levels,
+      meanHeights(wind),
+      (selected, surface) => {
+        state.levels = selected;
+        state.surfaceLayer = surface;
+        syncLevelTags();
+        resetParticles();
+        surfaceDirty = true;
+        lastProbeT = -1;
+      },
+      m.level_units,
+      { available: has10m, checked: state.surfaceLayer },
+    );
+
     // a steady CFD solution has a single frame and no forecast clock
     $('#timeline').hidden = m.times.length === 1;
     timeline.setData(m.times, m.init_time);
     setTime(Math.min(Math.max(state.t, m.times[0]), m.times[m.times.length - 1]));
-    if (newDomain) applyDomainDefaults(domain); // also applies the exaggeration
-    else applyExaggeration();
+    if (newDomain) applyViewDefaults(domain);
+    rebuildView();
     query.setBounds(domain);
     // probe coordinates are local to the old domain
     if (probe && (newDomain || !domain.contains(probe.x, probe.y))) {
@@ -369,12 +361,12 @@ function updateProbe(): void {
     lead: state.t,
     steady: wind.times.length === 1,
     levelUnit: wind.manifest.level_units ?? 'hPa',
-    selectedLevels: state.mode === 'single' ? state.levels : [],
+    selectedLevels: state.levels.length === data.wind.levels.length ? [] : state.levels,
     rows,
     surface: wind.u10 && wind.v10 ? surfaceRow(wind, tw, lat, lon, ground) : null,
     maxSpeed: data.maxSpeed,
   });
-  const ex = state.exaggeration;
+  const ex = EXAGGERATION;
   const X = domain.sceneX(probe.x);
   const Z = domain.sceneZ(probe.y);
   const groundY = (ground / 1000) * ex;
@@ -384,23 +376,6 @@ function updateProbe(): void {
   probeNew = null;
 }
 
-/** Explain empty levels, e.g. 1000 hPa inside a deep low lies below sea level. */
-function updateNotice(): void {
-  const el = $('#notice');
-  if (!data || ps.n === 0 || state.mode !== 'single') {
-    el.hidden = true;
-    return;
-  }
-  // chosen levels with no live particle lie below the terrain everywhere
-  const alive = new Set<number>();
-  for (let i = 0; i < ps.n; i++) if (ps.alive[i]) alive.add(ps.level[i]);
-  const empty = state.levels.filter((i) => !alive.has(i)).map((i) => levelLabel(data!.wind.manifest, data!.wind.levels[i]));
-  el.hidden = empty.length === 0;
-  if (!empty.length) return;
-  const one = empty.length === 1;
-  el.textContent = `${empty.join(' and ')} ${one ? 'lies' : 'lie'} below the terrain everywhere in this domain at ` +
-    `T+${Math.round(state.t)} h (surface pressure lower than that), so there is no wind to show at ${one ? 'this level' : 'these levels'}.`;
-}
 
 // ---------------------------------------------------------------- loop
 function resize(): void {
@@ -430,13 +405,19 @@ function frame(): void {
     ps.step(dt, ctx);
     particles.update(ps, data.maxSpeed);
 
-    // one translucent surface per chosen level; fainter when several are stacked
-    const opacity = state.levels.length > 1 ? 0.25 : 0.35;
+    // one translucent surface per layer on show; fainter when several are stacked
+    const opacity = state.levels.length + (state.surfaceLayer ? 1 : 0) > 1 ? 0.25 : 0.35;
     data.surfaces.forEach((s, i) => {
-      const show = state.showSurface && state.mode === 'single' && state.levels.includes(i);
+      const show = state.showSurface && state.levels.includes(i);
       s.mesh.visible = show;
-      if (show && surfaceDirty) s.update(i, ctx.tw, data!.terrain, state.exaggeration, data!.maxSpeed, opacity);
+      if (show && surfaceDirty) s.update(i, ctx.tw, data!.terrain, EXAGGERATION, data!.maxSpeed, opacity);
     });
+    const sl = data.surfaceMesh;
+    if (sl) {
+      const show = state.showSurface && state.surfaceLayer;
+      sl.mesh.visible = show;
+      if (show && surfaceDirty) sl.update(data.wind, ctx.tw, data!.terrain, EXAGGERATION, data!.maxSpeed, opacity);
+    }
     surfaceDirty = false;
     if (probe && Math.abs(state.t - lastProbeT) > 0.05) {
       updateProbe();
@@ -454,7 +435,6 @@ function frame(): void {
     $('#fps').textContent = `${Math.round(fpsN / fpsAcc)} fps · ${ps.n.toLocaleString('en')} particles`;
     fpsAcc = 0;
     fpsN = 0;
-    updateNotice();
   }
 }
 
@@ -464,13 +444,12 @@ async function start(): Promise<void> {
     index = await loadIndex();
     if (!index.datasets.length) throw new Error('no datasets in data/index.json');
     datasetSel.innerHTML = datasetOptions(index.datasets);
-    terrainSel.innerHTML = index.terrains.map((d) => `<option value="${d.id}">${d.label}</option>`).join('');
     const q = new URLSearchParams(location.search);
     const pick = (list: { id: string }[], want: string | null, prefer: string) =>
       list.find((d) => d.id === want)?.id ?? list.find((d) => d.id === prefer)?.id ?? list[0].id;
     datasetSel.value = pick(index.datasets, q.get('data'), 'fcn3');
-    terrainSel.value = terrainFor(index, datasetSel.value, pick(index.terrains, q.get('terrain'), 'terrain'));
-    await load(datasetSel.value, terrainSel.value);
+    history.replaceState(null, '', `?data=${datasetSel.value}`); // also drops a legacy ?terrain=
+    await load(datasetSel.value);
   } catch (err) {
     setLoading(null);
     showError(`Could not start: ${(err as Error).message}`);

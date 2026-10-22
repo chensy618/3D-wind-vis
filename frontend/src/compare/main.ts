@@ -6,15 +6,16 @@ import { Domain } from '../geo';
 import { Annotations, ProbeMarker } from '../scene/annotations';
 import { CameraRig, createCamera } from '../scene/camera';
 import { Highlight } from '../scene/highlight';
-import { LevelSurface } from '../scene/levels';
+import { LevelSurface, SurfaceLayer } from '../scene/levels';
 import { ParticleRenderer } from '../scene/particles';
 import { buildDomainFrame, buildTerrainMesh } from '../scene/terrain';
-import { GridOverlay } from '../surface/overlays';
+import { GridOverlay } from '../scene/gridOverlay';
 import { ForecastArrows } from './forecastArrows';
 import { windFromLabel } from '../ui/inspector';
 import { renderLegend } from '../ui/legend';
 import { Timeline } from '../ui/timeline';
-import { AdvectionContext, ParticleSystem } from '../wind/advection';
+import { renderViewSwitcher } from '../ui/viewSwitcher';
+import { AdvectionContext, ParticleSystem, SURFACE_LEVEL } from '../wind/advection';
 import { timeWeights, TimeWeights } from '../wind/interpolation';
 import { loadIndex, loadTerrain, loadWind, loadWindManifest, Terrain, WindField } from '../wind/loader';
 
@@ -45,16 +46,17 @@ const STILL_FADE = { stillTime: 0.05, fadeOut: 0.25, horizontal: true };
 /** Trail length in frames here (the main viewer keeps the default 35). */
 const TRAIL_LEN = 45;
 
+/** Vertical exaggeration is fixed (no slider). */
+const EXAGGERATION = 1;
+
 const state = {
   t: 0,
   playing: false,
   rate: 1, // forecast hours per second
-  level: 1, // index into the shared levels (default 150 m)
-  /** all levels stacked instead of the one chosen level */
-  all: false,
   showSurface: true,
   speedFactor: 300,
-  exaggeration: 4,
+  levels: [] as number[], // shown level indices, ascending; all of them by default
+  surfaceLayer: false, // the 10 m layer is on show; only when both datasets have u10/v10
 };
 
 /** A forecast with both datasets: its raw output on the CFD box and WindINR driven by it. */
@@ -81,6 +83,7 @@ class Pane {
   private content: THREE.Group | null = null;
   private terrainMesh: THREE.Mesh | null = null;
   private surfaces: LevelSurface[] = [];
+  private surfaceMesh: SurfaceLayer | null = null;
   private annotations: Annotations | null = null;
   /** grid lines draped over the terrain */
   private readonly gridOverlay = new GridOverlay();
@@ -166,29 +169,36 @@ class Pane {
     this.content = new THREE.Group();
     this.terrainMesh = buildTerrainMesh(terrain, domain);
     this.surfaces = wind.levels.map(() => new LevelSurface(wind, domain));
+    this.surfaceMesh = wind.u10 && wind.v10 ? new SurfaceLayer(terrain, domain) : null;
     this.annotations = new Annotations(domain);
-    this.content.add(this.terrainMesh, ...this.surfaces.map((s) => s.mesh), this.annotations.group);
+    this.content.add(this.terrainMesh, ...this.surfaces.map((s) => s.mesh), ...(this.surfaceMesh ? [this.surfaceMesh.mesh] : []), this.annotations.group);
     this.scene.add(this.content);
     if (!this.rig) this.rig = createCamera(this.canvas, domain);
     else this.rig.setDomain(domain);
   }
 
   /** Rebuild what depends on the vertical exaggeration. */
-  applyExaggeration(terrain: Terrain, domain: Domain): void {
+  applyView(terrain: Terrain, domain: Domain): void {
     if (!this.wind || !this.content || !this.terrainMesh || !this.annotations) return;
     const w = this.wind;
     if (this.grid === 'native' && w.manifest.native_deg) {
-      this.gridOverlay.build('native', w.manifest.native_deg, w.manifest.model.replace(/\s*\(native\)$/, ''), null, terrain, domain, state.exaggeration, 2);
+      this.gridOverlay.build(w.manifest.native_deg, w.manifest.model.replace(/\s*\(native\)$/, ''), terrain, domain, EXAGGERATION, 2);
     } else if (this.grid === 'cfd' && w.manifest.training) {
-      this.gridOverlay.buildRegular(w.manifest.training.cfd_m / 1000, terrain, domain, state.exaggeration);
+      this.gridOverlay.buildRegular(w.manifest.training.cfd_m / 1000, terrain, domain, EXAGGERATION);
     }
-    this.terrainMesh.scale.y = state.exaggeration;
+    this.terrainMesh.scale.y = EXAGGERATION;
     const top = w.manifest.variables.height.max + 500;
     this.content.getObjectByName('domain-frame')?.removeFromParent();
-    this.content.add(buildDomainFrame(domain, (top / 1000) * state.exaggeration));
+    this.content.add(buildDomainFrame(domain, (top / 1000) * EXAGGERATION));
     const heights = w.levels.map((_, i) => w.meanHeight(i, 0));
-    this.annotations.build(w.levels, heights, state.exaggeration, top, w.manifest.level_units);
-    this.annotations.highlight(w.levels.map((_, i) => isShown(i)));
+    this.annotations.build(w.levels, heights, EXAGGERATION, top, w.manifest.level_units);
+    this.highlightLevels(state.levels);
+  }
+
+  /** Accent the level tags of the levels on show. */
+  highlightLevels(levels: number[]): void {
+    if (!this.wind) return;
+    this.annotations?.highlight(this.wind.levels.map((_, i) => levels.includes(i)));
   }
 
   ctx(terrain: Terrain, domain: Domain, tw: TimeWeights): AdvectionContext {
@@ -198,7 +208,7 @@ class Pane {
       domain,
       tw,
       speedFactor: state.speedFactor,
-      exaggeration: state.exaggeration,
+      exaggeration: EXAGGERATION,
       vertical: true, // WindINR moves with its w; the raw forecast has none
       wBoost: W_BOOST,
     };
@@ -206,9 +216,8 @@ class Pane {
 
   resetParticles(terrain: Terrain, domain: Domain, tw: TimeWeights): void {
     if (!this.wind) return;
-    const levels = this.wind.levels.map((_, i) => i).filter(isShown);
+    const levels = [...this.wind.levels.map((_, i) => i).filter(isShown), ...(state.surfaceLayer ? [SURFACE_LEVEL] : [])];
     this.ps.reset(this.nParticles, levels, this.ctx(terrain, domain, tw));
-    this.annotations?.highlight(this.wind.levels.map((_, i) => isShown(i)));
   }
 
   /**
@@ -216,9 +225,18 @@ class Pane {
    * (see sideViewFade); `f` scales their opacity, 0 hides them.
    */
   fadeSurfaces(f: number): void {
-    if (!state.all) {
-      // one chosen level: always shown (at full material opacity)
-      for (const s of this.surfaces) (s.mesh.material as THREE.MeshBasicMaterial).opacity = 1;
+    if (state.levels.length + (state.surfaceLayer ? 1 : 0) === 1) {
+      // one layer on show: always at full material opacity, ignores the side-view fade
+      this.surfaces.forEach((s, i) => {
+        const on = state.showSurface && isShown(i);
+        s.mesh.visible = on;
+        if (on) (s.mesh.material as THREE.MeshBasicMaterial).opacity = 1;
+      });
+      if (this.surfaceMesh) {
+        const on = state.showSurface && state.surfaceLayer;
+        this.surfaceMesh.mesh.visible = on;
+        if (on) (this.surfaceMesh.mesh.material as THREE.MeshBasicMaterial).opacity = 1;
+      }
       return;
     }
     this.surfaces.forEach((s, i) => {
@@ -226,19 +244,28 @@ class Pane {
       s.mesh.visible = on;
       (s.mesh.material as THREE.MeshBasicMaterial).opacity = f;
     });
+    if (this.surfaceMesh) {
+      const on = state.showSurface && state.surfaceLayer && f > 0.01;
+      this.surfaceMesh.mesh.visible = on;
+      (this.surfaceMesh.mesh.material as THREE.MeshBasicMaterial).opacity = f;
+    }
   }
 
   updateSurfaces(terrain: Terrain, tw: TimeWeights, maxSpeed: number): void {
     if (this.arrows && this.wind && shared) {
       const shown = this.wind.levels.map((_, i) => i).filter(isShown);
-      this.arrows.update(this.wind, shared.domain, tw, shown, state.exaggeration, maxSpeed);
+      this.arrows.update(this.wind, shared.domain, tw, shown, EXAGGERATION, maxSpeed);
     }
     this.surfaces.forEach((s, i) => {
-      // a surface per level on show; fainter when all levels are stacked
       const show = state.showSurface && isShown(i);
       s.mesh.visible = show;
-      if (show) s.update(i, tw, terrain, state.exaggeration, maxSpeed, state.all ? 0.18 : 0.35);
+      if (show) s.update(i, tw, terrain, EXAGGERATION, maxSpeed, state.levels.length === 1 ? 1 : 0.18);
     });
+    if (this.surfaceMesh) {
+      const show = state.showSurface && state.surfaceLayer;
+      this.surfaceMesh.mesh.visible = show;
+      if (show) this.surfaceMesh.update(this.wind!, tw, terrain, EXAGGERATION, maxSpeed, state.surfaceLayer && state.levels.length === 0 ? 1 : 0.18);
+    }
   }
 
   resize(): void {
@@ -275,15 +302,21 @@ function whereText(d: Domain): string {
   return `<b>Northern Senja</b> · ${lat.toFixed(2)}° N, ${lon.toFixed(2)}° E`;
 }
 
-/** Is level i on show (the chosen one, or every level in all-levels mode)? */
+/** Is level i on show? */
 function isShown(i: number): boolean {
-  return state.all || i === state.level;
+  return state.levels.includes(i);
 }
 
 const raycaster = new THREE.Raycaster();
 const paneRaw = new Pane($('#pane-raw'), N_PARTICLES, LIFE_RAW, 'native');
 const paneInr = new Pane($('#pane-inr'), N_PARTICLES, undefined, 'cfd');
 const panes = [paneRaw, paneInr];
+
+renderViewSwitcher($('#views'), 'compare');
+
+function syncLevelTags(): void {
+  for (const p of panes) p.highlightLevels(state.levels);
+}
 
 let pairs: Pair[] = [];
 let shared: { terrain: Terrain; terrainId: string; domain: Domain; maxSpeed: number } | null = null;
@@ -349,34 +382,51 @@ function resetParticles(): void {
 }
 
 const levelsEl = $('#levels');
-function renderLevels(levels: number[], unit: string): void {
-  const btn = (i: string, on: boolean, text: string, title: string) =>
-    `<button data-i="${i}" class="${on ? 'on' : ''}" role="radio" aria-checked="${on}" title="${title}">${text}</button>`;
+
+/** One toggle button per level, then the 10 m layer and "All levels"; all on when the dataset loads. */
+function renderLevels(levels: number[], unit: string, has10m: boolean): void {
   levelsEl.innerHTML =
-    levels.map((lv, i) => btn(String(i), !state.all && i === state.level, `${lv} ${unit.split(' ')[0]}`, `${lv} ${unit}`)).join('') +
-    btn('all', state.all, 'All levels', 'All levels stacked');
+    levels.map((lv, i) => `<button type="button" data-i="${i}" class="on" aria-pressed="true">${lv} ${unit.split(' ')[0]}</button>`).join('') +
+    '<button type="button" data-10m="1"' + (has10m ? '>10 m AGL' : ' disabled>10 m AGL') + '</button>' +
+    '<button type="button" data-all="1">All levels</button>';
 }
+
 levelsEl.addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-i]');
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
   if (!b) return;
-  state.all = b.dataset.i === 'all';
-  if (!state.all) state.level = Number(b.dataset.i);
-  levelsEl.querySelectorAll('button').forEach((x) => {
-    const on = x === b;
+  const buttons = [...levelsEl.querySelectorAll<HTMLButtonElement>('[data-i]')];
+  const ten = levelsEl.querySelector<HTMLButtonElement>('[data-10m]');
+  if (b.dataset.all) {
+    state.levels = buttons.map((x) => parseInt(x.dataset.i!, 10));
+    state.surfaceLayer = !!ten && !ten.disabled;
+  } else if (b.dataset['10m']) {
+    if (ten!.disabled) return;
+    state.surfaceLayer = !state.surfaceLayer;
+    if (!state.surfaceLayer && !state.levels.length) {
+      state.surfaceLayer = true; // keep at least one layer on
+      return;
+    }
+  } else {
+    const i = parseInt(b.dataset.i!, 10);
+    const next = state.levels.includes(i) ? state.levels.filter((k) => k !== i) : [...state.levels, i].sort((a, c) => a - c);
+    if (!next.length && !state.surfaceLayer) return; // keep at least one layer on
+    state.levels = next;
+  }
+  for (const x of buttons) {
+    const on = isShown(parseInt(x.dataset.i!, 10));
     x.classList.toggle('on', on);
-    x.setAttribute('aria-checked', String(on));
-  });
+    x.setAttribute('aria-pressed', String(on));
+  }
+  if (ten && !ten.disabled) {
+    ten.classList.toggle('on', state.surfaceLayer);
+    ten.setAttribute('aria-pressed', String(state.surfaceLayer));
+  }
+  syncLevelTags();
   resetParticles();
   surfaceDirty = true;
   probeDirty = true;
 });
 
-const flowInp = $<HTMLInputElement>('#flow-speed');
-const showFlow = () => ($('#flow-speed-out').textContent = `×${state.speedFactor}`);
-flowInp.addEventListener('input', () => {
-  state.speedFactor = Number(flowInp.value);
-  showFlow();
-});
 $<HTMLInputElement>('#show-surface').addEventListener('change', (e) => {
   state.showSurface = (e.target as HTMLInputElement).checked;
   surfaceDirty = true;
@@ -414,9 +464,6 @@ async function load(driver: string): Promise<void> {
       const terrain = await loadTerrain(terrainId);
       shared = { terrain, terrainId, domain: Domain.fromGrid(terrain.grid), maxSpeed: 0 };
       state.speedFactor = shared.domain.viewDefaults.flowSpeed;
-      state.exaggeration = shared.domain.viewDefaults.exaggeration;
-      flowInp.value = String(state.speedFactor);
-      showFlow();
     }
     $('#where').innerHTML = whereText(shared.domain);
     // one colour scale for both, so equal colours mean equal speeds
@@ -430,13 +477,14 @@ async function load(driver: string): Promise<void> {
       inr.manifest.model,
       tr ? `Terrain ${tr.terrain_m} m | CFD ${tr.cfd_m} m (grid lines)` : '',
     );
+    const m = inr.manifest;
+    state.levels = m.levels.map((_, i) => i);
+    state.surfaceLayer = false; // both panes start without the 10 m layer
+    renderLevels(m.levels, m.level_units ?? 'hPa', !!(raw.u10 && raw.v10 && inr.u10 && inr.v10));
     for (const p of panes) {
       p.resize();
-      p.applyExaggeration(terrain, domain);
+      p.applyView(terrain, domain);
     }
-    const m = inr.manifest;
-    state.level = Math.min(state.level, m.levels.length - 1);
-    renderLevels(m.levels, m.level_units ?? 'hPa');
     timeline.setData(m.times, m.init_time);
     setTime(Math.min(Math.max(state.t, m.times[0]), m.times[m.times.length - 1]));
     renderLegend($('#legend'), shared.maxSpeed);
@@ -473,28 +521,32 @@ for (const p of panes) {
   });
 }
 
-/**
- * Popup text: wind (speed, from-direction, and w where the data has it) at the chosen level,
- * or one line per level above the ground, top first, in all-levels mode.
- */
+/** Popup text: one line per level above the ground, top first. */
 function popupHtml(wind: WindField, tw: TimeWeights, lat: number, lon: number, ground: number): string {
   const unit = wind.manifest.level_units ?? 'hPa';
-  const line = (k: number, withW: boolean) => {
+  const signed = (x: number) => `${x >= 0 ? '+' : '−'}${Math.abs(x).toFixed(1)} m/s`;
+  const line = (k: number) => {
     const head = `<span class="k">${wind.levels[k]} ${unit}</span>`;
     if (wind.sample(wind.height, tw, k, lat, lon) <= ground) return `${head} · below terrain`;
     const u = wind.sample(wind.u, tw, k, lat, lon);
     const v = wind.sample(wind.v, tw, k, lat, lon);
-    const w = withW && wind.w ? wind.sample(wind.w, tw, k, lat, lon) : null;
-    const ws = w == null ? '' : ` · <span class="k">w</span> ${w >= 0 ? '+' : '−'}${Math.abs(w).toFixed(1)} m/s`;
+    const w = wind.w ? wind.sample(wind.w, tw, k, lat, lon) : null;
+    const ws = w == null ? '' : ` · <span class="k">w</span> ${signed(w)}`;
     return `${head} · <b>${Math.hypot(u, v).toFixed(1)} m/s</b> from ${windFromLabel(u, v)}${ws}`;
   };
-  if (!state.all) return line(state.level, true);
-  return wind.levels
+  const levelLines = wind.levels
     .map((_, k) => k)
+    .filter(isShown)
     .filter((k) => wind.sample(wind.height, tw, k, lat, lon) > ground)
     .sort((a, b) => wind.sample(wind.height, tw, b, lat, lon) - wind.sample(wind.height, tw, a, lat, lon))
-    .map((k) => line(k, true))
-    .join('<br>') || `<span class="k">all levels</span> · below terrain`;
+    .map((k) => line(k));
+  const ten =
+    state.surfaceLayer && wind.u10 && wind.v10
+      ? [
+          `<span class="k">10 m AGL</span> · <b>${Math.hypot(wind.sampleSurface(wind.u10, tw, lat, lon), wind.sampleSurface(wind.v10, tw, lat, lon)).toFixed(1)} m/s</b>${wind.w10 ? ` · <span class="k">w</span> ${signed(wind.sampleSurface(wind.w10, tw, lat, lon))}` : ''}`,
+        ]
+      : [];
+  return [...levelLines, ...ten].join('<br>') || `<span class="k">shown layers</span> · below terrain`;
 }
 
 /** Place the marker and popup in both views at the probe point. */
@@ -509,14 +561,15 @@ function updateProbe(): void {
   const lat = domain.lat(probe.y);
   const lon = domain.lon(probe.x);
   const ground = terrain.at(lat, lon);
-  const ex = state.exaggeration;
+  const ex = EXAGGERATION;
   const X = domain.sceneX(probe.x);
   const Z = domain.sceneZ(probe.y);
   const gy = (ground / 1000) * ex;
   const heights = inr.levels.map((_, k) => inr.sample(inr.height, tw, k, lat, lon));
   const ys = heights.filter((h) => h > ground).map((h) => (h / 1000) * ex);
-  // popup at the chosen level (all levels: the top one), or on the ground where it is inside the terrain
-  const popH = state.all ? Math.max(...heights) : heights[state.level];
+  // popup at the highest shown layer (the 10 m layer alone means the ground), or on the ground where the terrain is higher
+  const shownLevels = heights.map((h, k) => ({ h, k })).filter((x) => isShown(x.k));
+  const popH = Math.max(...(shownLevels.length ? shownLevels.map((x) => x.h) : []), state.surfaceLayer ? ground + 10 : -Infinity);
   const popY = (Math.max(popH, ground) / 1000) * ex;
   for (const p of panes) {
     p.marker.set(X, Z, gy, ys, 0.5 * domain.scale);

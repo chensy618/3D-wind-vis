@@ -9,8 +9,9 @@
     <div id="app">
       <canvas id="view"></canvas>
 
+      <nav class="panel view-switch" id="views" aria-label="Views"></nav>
+
       <header class="panel" id="info">
-        <nav class="nav"><a href="./surface.html">10 m surface wind and terrain effects →</a> · <a href="./compare.html">Forecast vs WindINR →</a></nav>
         <h1>Senja 3D Wind</h1>
         <div class="meta">
           <span id="model-name"></span>
@@ -23,7 +24,6 @@
         <section>
           <h2>Data</h2>
           <label class="field">Forecast <select id="dataset" aria-label="Forecast dataset"></select></label>
-          <label class="field">Terrain <select id="terrain" aria-label="Terrain"></select></label>
           <div class="desc small" id="terrain-src"></div>
         </section>
         <section>
@@ -31,21 +31,12 @@
           <div id="query"></div>
         </section>
         <section>
-          <h2>Vertical level</h2>
+          <h2>Layers</h2>
           <div id="levels"></div>
         </section>
         <section>
           <h2>Display</h2>
-          <label class="range">Particles <output id="n-particles-out"></output>
-            <input id="n-particles" type="range" min="1000" max="12000" step="500" value="4000" />
-          </label>
-          <label class="range">Flow speed <output id="flow-speed-out"></output>
-            <input id="flow-speed" type="range" min="10" max="1000" step="5" value="300" />
-          </label>
-          <label class="range">Vertical exaggeration <output id="exaggeration-out"></output>
-            <input id="exaggeration" type="range" min="1" max="10" step="0.5" value="4" />
-          </label>
-          <label class="check"><input id="show-surface" type="checkbox" checked /> Level surface (speed)</label>
+          <label class="check"><input id="show-surface" type="checkbox" checked /> Level surfaces</label>
           <label class="check"><input id="vertical" type="checkbox" checked /> Vertical motion (w)</label>
           <label class="check"><input id="smooth" type="checkbox" checked /> Smooth time interpolation</label>
           <button id="reset-camera" class="wide">Reset camera</button>
@@ -60,7 +51,6 @@
 
       <div id="loading" hidden><div class="spinner"></div><span>Loading…</span></div>
       <div id="error" role="alert" hidden></div>
-      <div id="notice" hidden></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

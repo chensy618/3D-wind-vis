@@ -164,6 +164,8 @@ def export_web(ds: xr.Dataset, out_dir: str | Path) -> Path:
         manifest["surface"] = surface
     if "native_deg" in ds.attrs:  # spacing of the model's own lat/lon grid
         manifest["native_deg"] = float(ds.attrs["native_deg"])
+    if "terrain" in ds.attrs:  # the terrain id this dataset's domain was built on
+        manifest["terrain"] = str(ds.attrs["terrain"])
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1))
     update_index(out.parent)
     return out / "manifest.json"
