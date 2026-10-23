@@ -2,7 +2,7 @@
  "schema": "senja-common-wind-v1",
  "model": "Synthetic",
  "init_time": "synthetic",
- "description": "u = 5 + 2 sin(x), v = 3 cos(y) on flat levels at 50, 150, 300, 500 m above sea level, stronger and veering with height; 10 m wind 0.7x and backed 15 deg. Vertical wind forced by the Senja DTM: w10 = V10\u00b7\u2207h, aloft V\u00b7\u2207h decaying with height above the ground (1 km). No wind inside the terrain",
+ "description": "u = 5 + 2 sin(x), v = 3 cos(y) on flat levels at 50, 150, 300, 500 m above sea level, stronger and veering with height; 10 m wind 0.7x and backed 15 deg. Vertical wind forced by the Senja DTM: w10 = V10\u00b7\u2207h, aloft V\u00b7\u2207h decaying with height above the ground (1 km)",
  "shape": [
   5,
   4,
@@ -158,7 +158,7 @@
   "u": {
    "file": "u.bin",
    "units": "m s-1",
-   "min": 0.0,
+   "min": 3.024543285369873,
    "max": 8.112259864807129
   },
   "v": {
@@ -176,14 +176,14 @@
   "wind_speed": {
    "file": "wind_speed.bin",
    "units": "m s-1",
-   "min": 0.0,
+   "min": 3.0405001640319824,
    "max": 8.643486022949219
   },
   "w": {
    "file": "w.bin",
    "units": "m s-1",
-   "min": -2.5303666591644287,
-   "max": 2.741251230239868
+   "min": -2.6109378337860107,
+   "max": 2.840498208999634
   }
  },
  "surface": {

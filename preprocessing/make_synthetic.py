@@ -7,7 +7,9 @@
     w10 = V10 . grad(h)                 air follows the Senja DTM (h smoothed to the wind grid)
     w   = V . grad(h) exp(-(z - h) / H) the terrain forcing decays with height above the ground
                                         (H = 1 km)
-    Inside the terrain (level at or below the ground) u = v = w = 0, as in the WindINR export.
+    The field is defined over the whole region, inside the terrain too (it is synthetic): the
+    viewer hides the parts of a level under the ground, and the wind next to a mountain is not
+    pulled towards zero by grid points inside it.
 
 Usage:
     python preprocessing/make_synthetic.py
@@ -101,11 +103,10 @@ def main() -> None:
         for il, z in enumerate(LEVELS_ASL):
             scale = 1.0 + 0.27 * z / 1000.0  # stronger aloft
             turn = np.deg2rad(6.0 * z / 1000.0)  # veering with height
-            agl = z - ground
-            above = agl > 0
-            u[it, il] = np.where(above, scale * (u0 * np.cos(turn) - v0 * np.sin(turn)), 0.0)
-            v[it, il] = np.where(above, scale * (u0 * np.sin(turn) + v0 * np.cos(turn)), 0.0)
-            w[it, il] = np.where(above, (u[it, il] * dhdx + v[it, il] * dhdy) * np.exp(-agl / W_DECAY_M), 0.0)
+            agl = np.maximum(z - ground, 0.0)  # inside the terrain: the forcing at the ground
+            u[it, il] = scale * (u0 * np.cos(turn) - v0 * np.sin(turn))
+            v[it, il] = scale * (u0 * np.sin(turn) + v0 * np.cos(turn))
+            w[it, il] = (u[it, il] * dhdx + v[it, il] * dhdy) * np.exp(-agl / W_DECAY_M)
         back = np.deg2rad(-15)
         u10[it] = 0.7 * (u0 * np.cos(back) - v0 * np.sin(back))
         v10[it] = 0.7 * (u0 * np.sin(back) + v0 * np.cos(back))
@@ -121,8 +122,7 @@ def main() -> None:
             "description": "u = 5 + 2 sin(x), v = 3 cos(y) on flat levels at "
                            f"{', '.join(map(str, LEVELS_ASL))} m above sea level, stronger and veering with height; "
                            "10 m wind 0.7x and backed 15 deg. Vertical wind forced by the Senja DTM: "
-                           "w10 = V10·∇h, aloft V·∇h decaying with height above the ground (1 km). "
-                           "No wind inside the terrain",
+                           "w10 = V10·∇h, aloft V·∇h decaying with height above the ground (1 km)",
         },
         surface={"u10": u10, "v10": v10, "w10": w10},
     )

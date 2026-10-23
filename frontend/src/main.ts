@@ -4,7 +4,7 @@ import './style.css';
 import { niceMax } from './colormap';
 import { Domain } from './geo';
 import { Annotations, ProbeMarker } from './scene/annotations';
-import { CameraRig, createCamera } from './scene/camera';
+import { CameraRig, createCamera, sideViewFade } from './scene/camera';
 import { Highlight } from './scene/highlight';
 import { LevelSurface, SurfaceLayer } from './scene/levels';
 import { ParticleRenderer } from './scene/particles';
@@ -25,6 +25,10 @@ const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as
 // ---------------------------------------------------------------- state
 /** The default view stands this much further back than the camera's own framing (a little smaller). */
 const VIEW_DISTANCE = 1.12;
+/** Particle trail length in frames (ParticleSystem default 35; the compare page uses 45). */
+const TRAIL_LEN = 50;
+/** The steady CFD cases (CFD box, up to 1.5 km, no timeline) sit a little lower in their default view. */
+const viewLift = (d: Domain) => (d.scale < 0.5 && data?.wind.times.length === 1 ? 0.09 : 0);
 
 const state = {
   t: 0,
@@ -80,6 +84,7 @@ scene.add(sun);
 
 const particles = new ParticleRenderer();
 const ps = new ParticleSystem();
+ps.trailLen = TRAIL_LEN;
 const marker = new ProbeMarker();
 const highlight = new Highlight();
 scene.add(particles.group, marker.group, highlight.group);
@@ -124,10 +129,17 @@ const onDataChange = () => {
 };
 datasetSel.addEventListener('change', onDataChange);
 
-/** Flow speed and vertical exaggeration suited to the domain size (Domain.viewDefaults). */
-function applyViewDefaults(domain: Domain): void {
-  state.speedFactor = domain.viewDefaults.flowSpeed;
-  state.exaggeration = domain.viewDefaults.exaggeration;
+/**
+ * Flow speed (on a new domain) and vertical exaggeration suited to the domain size
+ * (Domain.viewDefaults). Data that end low over a wide domain, like the synthetic field (1.5 km
+ * over 52 km), are stretched a little further, up to ×6; the forecasts (×4), CFD and WindINR
+ * (×1.5) keep their domain value.
+ */
+function applyViewDefaults(domain: Domain, wind: WindField, newDomain: boolean): void {
+  const d = domain.viewDefaults;
+  if (newDomain) state.speedFactor = d.flowSpeed;
+  const topKm = (wind.manifest.variables.height.max + 500) / 1000;
+  state.exaggeration = Math.max(d.exaggeration, Math.min(6, (0.25 * Math.max(domain.width, domain.depth)) / topKm));
 }
 
 // ---------------------------------------------------------------- helpers
@@ -190,8 +202,7 @@ function shortDescription(m: WindField['manifest']): string {
   // WindINR does not forecast: trained on CFD runs, it then downscales the coarse forecast per lead time
   if (driver) {
     const by = MODEL_SOURCES[driver]?.split(', ')[0] ?? driver;
-    const trained = m.description.match(/trained on ([^)]+)\)/)?.[1] ?? 'CFD simulations';
-    return `Trained on ${trained}, then downscales the ${by} forecast to high resolution over the Senja CFD domain`;
+    return `CFD-trained downscaling of ${by} over the Senja domain`;
   }
   const inflow = m.description.match(/inflow from \S+ \((\w+)\) at ([\d.]+ m\/s)/);
   if (inflow) return `Steady RANS, inflow from ${inflow[1]} at ${inflow[2]}`;
@@ -276,7 +287,7 @@ async function load(datasetId: string): Promise<void> {
     };
 
     if (!rig) {
-      rig = createCamera(canvas, domain, VIEW_DISTANCE);
+      rig = createCamera(canvas, domain, VIEW_DISTANCE, viewLift);
       resize();
     } else if (newDomain) {
       rig.setDomain(domain);
@@ -315,7 +326,7 @@ async function load(datasetId: string): Promise<void> {
     $('#timeline').hidden = m.times.length === 1;
     timeline.setData(m.times, m.init_time);
     setTime(Math.min(Math.max(state.t, m.times[0]), m.times[m.times.length - 1]));
-    if (newDomain) applyViewDefaults(domain);
+    applyViewDefaults(domain, wind, newDomain);
     rebuildView();
     query.setBounds(domain);
     // probe coordinates are local to the old domain
@@ -446,6 +457,14 @@ function frame(): void {
       const show = state.showSurface && state.surfaceLayer;
       sl.mesh.visible = show;
       if (show && surfaceDirty) sl.update(data.wind, ctx.tw, data!.terrain, state.exaggeration, data!.maxSpeed, opacity);
+    }
+    // several layers: their surfaces show from the side and fade out as the view tilts up, as on
+    // the compare page, so an oblique or top view shows the particles alone; one layer always shows
+    const fade = nLayers > 1 ? sideViewFade(rig) : 1;
+    for (const mesh of [...data.surfaces.map((s) => s.mesh), ...(sl ? [sl.mesh] : [])]) {
+      if (!mesh.visible) continue;
+      (mesh.material as THREE.MeshBasicMaterial).opacity = fade;
+      mesh.visible = fade > 0.01;
     }
     surfaceDirty = false;
     if (probe && Math.abs(state.t - lastProbeT) > 0.05) {

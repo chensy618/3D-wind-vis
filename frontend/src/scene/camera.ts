@@ -19,9 +19,11 @@ const PAN_SECONDS = 0.8;
 
 /**
  * Perspective camera with orbit (rotate), dolly (zoom) and pan. `distance` scales how far the
- * default view stands back from the domain (1: the domain fills the view; larger shows it smaller).
+ * default view stands back from the domain (1: the domain fills the view; larger shows it smaller);
+ * `lift(domain)` raises the orbit centre by that fraction of the domain size, which moves the
+ * domain down in the view; it is read on every reset, so it may depend on what is shown.
  */
-export function createCamera(dom: HTMLElement, domain: Domain, distance = 1): CameraRig {
+export function createCamera(dom: HTMLElement, domain: Domain, distance = 1, lift: (d: Domain) => number = () => 0): CameraRig {
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
   const controls = new OrbitControls(camera, dom);
   controls.enableDamping = true;
@@ -31,15 +33,17 @@ export function createCamera(dom: HTMLElement, domain: Domain, distance = 1): Ca
   controls.maxDistance = 400;
 
   let size = 0;
+  let box = domain;
   const reset = () => {
     // looking from the south-west over the ocean towards the Senja mountains
     // (target shifted west so the domain sits right of the control panel)
-    controls.target.set(-0.1 * size, 0.06 * size, 0);
+    controls.target.set(-0.1 * size, (0.06 + lift(box)) * size, 0);
     camera.position.set(-0.75 * size, 0.49 * size, 0.95 * size).multiplyScalar(distance).add(controls.target);
     controls.update();
   };
   const setDomain = (d: Domain) => {
     size = Math.max(d.width, d.depth);
+    box = d;
     controls.minDistance = Math.min(3, 0.1 * size);
     reset();
   };
@@ -78,4 +82,17 @@ export function createCamera(dom: HTMLElement, domain: Domain, distance = 1): Ca
       camera.updateProjectionMatrix();
     },
   };
+}
+
+/** Stacked level surfaces: fully shown below this camera elevation (deg), gone above SIDE_VIEW_HIDE. */
+const SIDE_VIEW_SHOW = 8;
+const SIDE_VIEW_HIDE = 16;
+
+/** 1 for a side view, 0 for the default oblique view (~22°) or looking down, smooth in between. */
+export function sideViewFade(rig: CameraRig | null): number {
+  if (!rig) return 0;
+  const d = rig.camera.position.clone().sub(rig.controls.target);
+  const elev = (Math.asin(Math.min(1, Math.max(-1, d.y / (d.length() || 1)))) * 180) / Math.PI;
+  const t = Math.min(1, Math.max(0, (SIDE_VIEW_HIDE - elev) / (SIDE_VIEW_HIDE - SIDE_VIEW_SHOW)));
+  return t * t * (3 - 2 * t);
 }

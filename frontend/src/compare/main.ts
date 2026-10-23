@@ -4,7 +4,7 @@ import '../style.css';
 import { niceMax } from '../colormap';
 import { Domain } from '../geo';
 import { Annotations, ProbeMarker } from '../scene/annotations';
-import { CameraRig, createCamera } from '../scene/camera';
+import { CameraRig, createCamera, sideViewFade } from '../scene/camera';
 import { Highlight } from '../scene/highlight';
 import { LevelSurface, SurfaceLayer } from '../scene/levels';
 import { ParticleRenderer } from '../scene/particles';
@@ -331,20 +331,6 @@ for (const p of panes) {
   }
 }
 
-/** All-levels surfaces: fully shown below this camera elevation (deg), gone above SIDE_VIEW_HIDE. */
-const SIDE_VIEW_SHOW = 8;
-const SIDE_VIEW_HIDE = 16;
-
-/** 1 for a side view, 0 for the default oblique view (~22°) or looking down, smooth in between. */
-function sideViewFade(): number {
-  const r = master.rig;
-  if (!r) return 0;
-  const d = r.camera.position.clone().sub(r.controls.target);
-  const elev = (Math.asin(Math.min(1, Math.max(-1, d.y / (d.length() || 1)))) * 180) / Math.PI;
-  const t = Math.min(1, Math.max(0, (SIDE_VIEW_HIDE - elev) / (SIDE_VIEW_HIDE - SIDE_VIEW_SHOW)));
-  return t * t * (3 - 2 * t);
-}
-
 function syncCameras(): void {
   const m = master.rig;
   if (!m) return;
@@ -614,7 +600,7 @@ function frame(): void {
     }
     highlightTick(dt);
     syncCameras();
-    const fade = sideViewFade();
+    const fade = sideViewFade(master.rig);
     for (const p of panes) p.fadeSurfaces(fade);
     panes.forEach((p) => p.render());
   }

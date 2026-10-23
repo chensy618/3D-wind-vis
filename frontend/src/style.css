@@ -64,7 +64,9 @@ h3 { font-size: 12px; margin: 12px 0 6px; color: var(--muted); font-weight: 600;
 }
 #ui > #side { pointer-events: none; }
 #side > .panel { position: relative; flex: none; pointer-events: auto; }
-#info { max-width: 420px; }
+#info { max-width: 460px; }
+/* the model description on one line; anything longer ends in an ellipsis (full text on hover) */
+#model-desc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #info .meta { display: flex; gap: 10px; font-weight: 600; color: var(--accent); }
 #info .meta span:empty { display: none; }
 .desc { color: var(--muted); margin-top: 4px; line-height: 1.35; }
