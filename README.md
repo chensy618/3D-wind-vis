@@ -1,237 +1,155 @@
-# Senja 3D Wind — MVP
+# Senja 3D Wind
 
-Interactive 3D visualization of multi-level atmospheric wind over Senja, Northern Norway.
+Interactive 3D visualization of wind over Senja, Northern Norway: global AI forecasts, steady
+CFD runs and WindINR downscaling, all shown over the real terrain in the browser.
 
 ```
-FCN3 (pretrained)  →  Senja crop  →  u / v / geopotential, 10 m wind  →  common wind schema  →  Three.js viewer
-                                                                                              + Kartverket DTM terrain
+forecast model (FCN3 · GraphCast · Aurora) ─┐
+OpenFOAM CFD cases ─────────────────────────┼─▶ common wind schema ─▶ Three.js viewer
+WindINR × forecast ─────────────────────────┘          + Kartverket DTM terrain
 ```
 
-Three pretrained models drive the viewers: **FourCastNet v3 (FCN3, 0.25°)** from earth2studio
-and **GraphCast 0.25°** (Google DeepMind, `GraphCast_operational`), both started from ERA5, and
-**Aurora 0.1° Fine-Tuned** (Microsoft, `AuroraHighRes`), started from IFS HRES analysis. The
-viewers read only the common schema, so ERA5, CARRA or the U-NO/GNO/NOFE models can be added
-later by writing another converter.
+The viewer reads only the common schema, so a new model needs a converter and no frontend change.
 
-## Quick start (local machine)
+## Quick start
 
-The repo ships the processed data the viewer needs, so it runs directly after cloning.
-The only requirement is Node.js 18 or newer; no Python, GPU or HPC access is needed.
+The repo ships all the data the viewer loads (`data/web/`, about 17 MB). You only need Node.js 18 or newer.
 
 ```bash
 git clone git@github.com:chensy618/3D-wind-vis.git
 cd 3D-wind-vis/frontend
 npm install
-npm run dev        # open http://127.0.0.1:5173
+npm run dev        # http://127.0.0.1:5173
 ```
 
-`npm run build` produces a static site in `frontend/dist` (data included) that any web server can host.
+To publish the viewer on a web server, `npm run build` writes a static site, data included, to `frontend/dist`.
 
-**Windows:** `frontend/public/data` is a symlink to `data/web`, which Windows git often checks
-out as a plain text file. If the viewer says it cannot load data, delete `frontend/public/data`
-and copy the `data/web` folder there as `data`, or clone with `git clone -c core.symlinks=true`
-from a shell with Developer Mode enabled. macOS and Linux work as-is.
+> **Windows:** `frontend/public/data` is a symlink to `data/web`, which git on Windows often
+> checks out as a text file. If the viewer cannot load data, replace it with a copy of `data/web`,
+> or clone with `git clone -c core.symlinks=true` with Developer Mode on.
 
-## Data in this repo
+## The two views
 
-Included in `data/web/` (about 17 MB, everything the viewer loads):
+The switcher at the top of the page moves between them.
 
-- FCN3 forecast initialized 2024-01-31 06 UTC: T+0 to T+24 h, 5 pressure levels (u, v, height, wind speed) and the 10 m wind
-- Aurora 0.1° forecast for the same case and the same fields (65 model grid points over Senja, against 12 for FCN3)
-- GraphCast 0.25° forecast for the same case and the same fields (12 grid points; same ERA5 initial state as FCN3)
-- Senja terrain: Kartverket DTM resampled to 256 × 256
-- Synthetic wind field on the WindINR levels (50, 150, 300, 500 m ASL), with a 10 m wind and a vertical wind forced by the Senja DTM, and synthetic terrain, for testing the frontend
-- OpenFOAM CFD over a 6 × 6 km box around Segla/Ersfjord (nine steady cases: from SW at 8, 12 and 16 m/s, and from W, NW, N, NE, E and S at 12 m/s),
-  on seven flat levels from 50 to 1500 m above sea level plus the 10 m wind, with its own 10 m DEM terrain (see [CFD datasets](#cfd-datasets))
+### 3D wind viewer (`index.html`)
 
-Not included (excluded by `.gitignore`; kept on Olivia and reproducible with the scripts):
+| Panel | What it does |
+|---|---|
+| **Query point** | Type `lat, lon` (e.g. `69.35, 17.60`; `lon, lat` is swapped automatically) to inspect a point. The camera pans to it. |
+| **Data** | The dataset menu, grouped as below; the terrain follows the dataset. |
+| **Layers** | One checkbox per level and one for the 10 m wind, plus **All layers**. Everything is on at load. |
+| **Display** | Level surfaces (translucent, coloured by speed), smooth time interpolation, reset camera. |
+| **Inspector** | Click the terrain: position, ground height, and speed, direction and w per level, with a vertical profile. |
+| **Timeline** | Play/pause, step (← / →, space), drag, playback speed. Hidden for steady CFD cases. |
 
-| Data | Size | Location | Regenerate with |
+- Particles follow the wind with bilinear interpolation in space and linear interpolation in time. They respawn when they expire, leave the domain or run into the terrain. Colour shows horizontal speed.
+- Datasets with a vertical wind (WindINR, CFD, synthetic) move particles with **w** too.
+- The **10 m layer** is a flat level at 10 m above sea level. Like the other levels, it is hidden where the terrain is higher.
+- **Vertical exaggeration** follows the domain size: ×4 for the 50 km Senja domain, ×1.5 for the CFD box.
+- The panels keep the same layout on every screen. Below 1400 × 800 they shrink as one; phones get a stacked layout.
+- Flow speed is a visual time scale, not the forecast clock: at real speed, 10 m/s crosses the 50 km domain in about 1.5 h.
+
+Mouse: left-drag rotates, right-drag pans, the wheel zooms, a click inspects.
+
+### Forecast vs WindINR (`compare.html`)
+
+Two linked views over the CFD box, sharing the camera, time and colour scale:
+
+- **left:** the raw forecast at its own resolution, with the model grid and one arrow per grid cell;
+- **right:** WindINR driven by that forecast, with the CFD grid.
+
+Choose the forecast model and the levels (or the 10 m layer) in the bar at the top. A click shows speed, direction and w per level in both views.
+
+## Datasets
+
+| Menu group | Datasets | Domain | Levels |
 |---|---|---|---|
-| Source DTM GeoTIFF, 25 m | 19 MB | `data/terrain/senja_dtm_25m_25833.tif` | `python preprocessing/terrain.py` |
-| Raw FCN3 crop (`.nc`) and common-schema `.zarr` | 1.4 MB | `data/forecast/` | `sbatch jobs/run_fcn3_senja.slurm`, then `convert_fcn3.py` |
-| Raw Aurora 0.1° crop (`.nc`) and `.zarr` | 2 MB | `data/forecast/` | `aurora01_inference.py --fetch-only`, `sbatch jobs/run_aurora01_senja.slurm`, then `convert_fcn3.py` |
-| Raw GraphCast 0.25° crop (`.nc`) and `.zarr` | 0.5 MB | `data/forecast/` | `graphcast_inference.py --fetch-only`, `sbatch jobs/run_graphcast_senja.slurm`, then `convert_fcn3.py` |
-| ERA5 input (GraphCast) and GraphCast 0.25° weights | 0.7 + 0.14 GB | `/cluster/work/projects/nn8106k/siyan/{graphcast_cache,windvis_weights/graphcast-operational}` | `graphcast_inference.py --fetch-only` |
-| IFS HRES analysis GRIB (Aurora input) and Aurora 0.1° weights | 6.5 + 4.9 GB | `/cluster/work/projects/nn8106k/siyan/{aurora01_cache,windvis_weights/aurora-0.1}` | `aurora01_inference.py --fetch-only` |
-| Synthetic `.zarr` | 0.9 MB | `data/synthetic/` | `python preprocessing/make_synthetic.py` |
-| OpenFOAM cases (mesh + solved fields) | ~0.1 GB each | LUMI `/scratch/project_465003463/siyan/github/wind_sim/case_senja*` | `wind_sim/` (separate repo), then `convert_openfoam.py` |
+| Forecast · Senja 50 km | FCN3 0.25°, GraphCast 0.25°, Aurora 0.1° (init 2024-01-31 06 UTC, T+0…24 h) | 69.15–69.60° N, 16.95–18.25° E | 1000, 925, 850, 700, 500 hPa + 10 m |
+| Forecast, native resolution · CFD box | the same forecasts, nearest model grid point on the CFD box | CFD box | 50, 150, 300, 500 m ASL + 10 m |
+| WindINR × forecast · CFD box | WindINR downscaling of each forecast | CFD box | 50, 150, 300, 500 m ASL + 10 m, with w |
+| CFD cases · CFD box | 9 steady OpenFOAM cases: from SW at 8/12/16 m/s, from W, NW, N, NE, E, S at 12 m/s | CFD box | 50 … 1500 m ASL (7 levels) + 10 m, with w |
+| Test | synthetic field with a vertical wind forced by the Senja DTM | Senja | 50, 150, 300, 500 m ASL + 10 m, with w |
 
-The preprocessing scripts run on any machine after `pip install -r requirements.txt`
-(`terrain.py` downloads from Kartverket, so it needs internet). FCN3 inference needs an
-NVIDIA GPU with CUDA and `earth2studio` with the FCN3 extras, plus a `~/.cdsapirc` key to
-fetch ERA5 initial conditions from CDS. Without a suitable GPU, run it on Olivia and copy
-the small output back.
+- **Senja domain:** about 52 × 50 km of ocean, fjords and mountains up to ~1000 m; 64 × 64 wind grid; terrain from the Kartverket NHM DTM 25 m, resampled to 256 × 256.
+- **CFD box:** about 6 × 6 km around Segla/Ersfjord (69.56–69.61° N, 17.41–17.55° E), with a 10 m DTM.
+- **Coarse models:** FCN3 and GraphCast have only about 12 grid points over Senja (Aurora about 65), so their wind does not resolve the terrain. WindINR and the CFD cases do.
+- **Default case:** init 2024-01-31 06 UTC, just before Storm Ingunn. The low is so deep that the 1000 hPa surface lies below sea level over the whole domain.
 
-## Layout
+## Repository layout
 
 ```
-model/fcn3_inference.py        FCN3 forecast on a GPU node → data/forecast/fcn3_<init>.nc (Senja crop)
-jobs/run_fcn3_senja.slurm      SLURM wrapper (accel partition, earth2studio env)
-model/aurora01_inference.py    Aurora 0.1°: fetch IFS HRES analysis (login node), run on a GPU node → data/forecast/aurora01_<init>.nc
-jobs/run_aurora01_senja.slurm  SLURM wrapper (GH200, earth2studio env + microsoft-aurora on PYTHONPATH)
-model/graphcast_inference.py   GraphCast 0.25°: fetch ERA5 from ARCO (login node), run with JAX on a GPU node → data/forecast/graphcast_<init>.nc
-jobs/run_graphcast_senja.slurm SLURM wrapper (GH200, earth2studio-graphcast env: jax[cuda13], dm-haiku, graphcast)
-preprocessing/common_schema.py common schema, zarr writer, web export, data index
-preprocessing/convert_fcn3.py  raw FCN3 crop → common schema (.zarr + web export)
-preprocessing/convert_openfoam.py  steady OpenFOAM cases → flat ASL levels + CFD-box terrain (web export)
-preprocessing/convert_windinr.py   forecast background → WindINR inputs; WindINR prediction → web export
-model/windinr_inference.py     WindINR background-mode inference (jobs/run_windinr_inference.sh: LUMI container)
-preprocessing/make_synthetic.py Phase 0 synthetic wind + synthetic terrain
-preprocessing/terrain.py       Kartverket NHM DTM (WCS) → Senja terrain grid
-data/terrain/                  source DTM GeoTIFF (25 m, EPSG:25833), kept for later high-res work
-data/forecast/                 raw model crops + common-schema .zarr
-data/web/                      browser data: index.json, <dataset>/manifest.json + *.bin
-frontend/                      TypeScript + Three.js + Vite viewer
+model/            inference: fcn3, aurora01, graphcast (GPU), windinr
+jobs/             SLURM / container wrappers for the inference scripts
+preprocessing/    converters to the common schema, terrain, synthetic data
+  common_schema.py   schema, zarr writer, web export, data/web/index.json
+  convert_fcn3.py    raw forecast crop → schema (FCN3, Aurora, GraphCast)
+  convert_openfoam.py  OpenFOAM cases → flat ASL levels + CFD-box terrain
+  convert_windinr.py   forecast → WindINR inputs; WindINR output → schema
+  terrain.py         Kartverket NHM DTM (WCS) → Senja terrain grid
+  make_synthetic.py  synthetic test field on the Senja DTM
+data/web/         what the browser loads: index.json, <dataset>/manifest.json + *.bin
+frontend/         TypeScript + Three.js + Vite
 ```
 
-## Domain and data
+## Common wind schema
 
-- **Region:** 69.15–69.60° N, 16.95–18.25° E (~52 × 50 km). It covers ocean, fjords and the Senja mountains, up to about 1000 m.
-- **Levels:** 1000, 925, 850, 700 and 500 hPa. Each is placed at its geopotential height H = Φ / g, which varies in space and time.
-- **Times:** T+0, 6, 12, 18 and 24 h.
-- **Wind grid:** 64 × 64. FCN3 runs at 0.25°, which is only about 10 km × 28 km at 69° N. The Senja grid is therefore a bilinear interpolation of a handful of model points and does not resolve terrain-scale flow. That is the job of the later high-resolution models.
-- **Terrain:** Kartverket NHM DTM, resampled to 256 × 256. Use `--n 500` for 500 × 500.
-- **Default forecast:** initialized 2024-01-31 06 UTC from ERA5 (via CDS), just before Storm Ingunn. The low is deep enough that the 1000 hPa surface lies below sea level over the whole domain. The viewer says so and shows no particles at that level.
+Each dataset is `data/web/<id>/manifest.json` plus one little-endian float32 `.bin` per
+variable, with dimensions `(time, level, latitude, longitude)` and latitude ascending.
+`index.json` is rebuilt on every export.
 
-### Common wind schema
+| Variable | Units | Meaning |
+|---|---|---|
+| `u`, `v` | m s⁻¹ | zonal / meridional wind |
+| `w` | m s⁻¹ | vertical wind, positive up (optional) |
+| `height` | m | level height: geopotential Φ/g, or the level itself for flat levels |
+| `wind_speed` | m s⁻¹ | √(u² + v²) |
+| `u10`, `v10`, `w10` | m s⁻¹ | optional 10 m wind, `(time, latitude, longitude)`, under `surface` |
 
-`wind.zarr` / `data/web/<id>/` have dimensions `(time, level, latitude, longitude)`. Latitude is ascending.
+Optional manifest fields: `label` (menu name), `group` (menu group), `level_units` (`hPa`, the
+default, or `m ASL`), `terrain` (the terrain the domain was built on; the viewers load it with the
+dataset) and `native_deg` (model grid spacing, drawn as grid lines).
 
-| variable     | units  | meaning                          |
-|--------------|--------|----------------------------------|
-| `u`, `v`     | m s⁻¹  | zonal / meridional wind          |
-| `height`     | m      | geopotential height Φ/g          |
-| `wind_speed` | m s⁻¹  | √(u² + v²)                       |
-| `u10`, `v10` | m s⁻¹  | optional 10 m wind, `(time, latitude, longitude)`, listed under `surface` in the manifest (FCN3 has it) |
+## Regenerating the data
 
-The web export is `manifest.json` (coordinates, shape and value ranges) plus one little-endian
-float32 `.bin` per variable. `data/web/index.json` lists every dataset and terrain, and is
-rebuilt automatically on each export.
+Only needed to change or add data. Not in the repo (see `.gitignore`), but reproducible:
 
-Optional manifest fields, used by the CFD datasets:
+| Data | Size | Regenerate with |
+|---|---|---|
+| Source DTM GeoTIFF, 25 m (`data/terrain/`) | 19 MB | `preprocessing/terrain.py` |
+| Raw forecast crops and `.zarr` (`data/forecast/`) | 0.5–2 MB each | the inference job, then `convert_fcn3.py` |
+| GraphCast ERA5 input + weights | 0.7 + 0.14 GB | `graphcast_inference.py --fetch-only` |
+| Aurora IFS HRES input + weights | 6.5 + 4.9 GB | `aurora01_inference.py --fetch-only` |
+| Synthetic `.zarr` (`data/synthetic/`) | 0.9 MB | `make_synthetic.py` |
+| OpenFOAM cases | ~0.1 GB each | `wind_sim` (separate repo), then `convert_openfoam.py` |
 
-| field         | meaning |
-|---------------|---------|
-| `label`       | menu name (default: model + init time) |
-| `level_units` | unit of `levels`: `hPa` (default) or `m ASL`, flat altitude levels with `height` = level |
-| `terrain`     | id of the terrain the dataset's domain was built on. Both viewers switch to it, and back to the default terrain when another dataset is chosen |
+### CFD cases
 
-## CFD datasets
+Steady RANS (`simpleFoam`, k-ε, neutral log-law inflow) on a ~197 k-cell terrain-following mesh.
+Each case is one inflow direction and speed (`Uref` at 10 m), so the dataset has a single frame.
 
-Steady RANS runs (OpenFOAM `simpleFoam`, k-ε, neutral log-law inflow) from the `wind_sim`
-project, on a ~197 k-cell terrain-following mesh over a 6 × 6 km box at Segla/Ersfjord
-(69.56–69.61° N, 17.41–17.55° E). Each case is one inflow direction and speed (`Uref` at
-10 m), not a forecast: the dataset has a single frame, and the viewers hide the timeline.
+`convert_openfoam.py` interpolates the cell-centre velocity to 96 × 96 points on the flat levels
+and to 10 m above ground. The wind is 0 inside the terrain. Below the first cell centre (17 m over
+the sea) it follows the log law, u/v are rotated from UTM grid north to true north (~2°), and
+250 m is trimmed off each side, where the terrain meets the inflow and outflow boundaries.
 
-`convert_openfoam.py` interpolates the cell-centre velocity (linear on a Delaunay
-triangulation in x, y and height above ground) to 96 × 96 points on flat levels at 50, 150,
-300, 500, 700, 1000 and 1500 m above sea level. The mountains (up to ~800 m) cut through the
-lower levels: the wind is 0 inside the terrain, and the viewer hides those parts of a level
-and lets no particles in. It also samples 10 m above ground as `u10`/`v10`/`w10` for the point
-probe. Below the first cell centre (17 m over the sea) the wind is extrapolated with the
-log law (z0 of the case). u/v are rotated from UTM grid north to true north (~2° here), w (positive up) is kept as is, and
-250 m is trimmed off each side of the box, where terrain meets the inflow/outflow boundaries.
+Case names give the direction the flow goes *toward* as a math angle (`D225` = toward the SW,
+so from the NE); the 45° cases are named `case_senja_U<speed>`, without a `D`.
 
-```bash
-# cell centres, once per mesh (OpenFOAM v2412 on LUMI: module use /appl/local/csc/modulefiles; module load openfoam/v2412)
-cp -r wind_sim/case_senja_U12/{constant,system} /tmp/cc/ && mkdir -p /tmp/cc/0
-postProcess -func writeCellCentres -time 0 -case /tmp/cc     # -> /tmp/cc/0/C
+### WindINR × forecast
 
-python preprocessing/convert_openfoam.py --centres /tmp/cc/0/C \
-    --domain-info ../wind_sim/case_senja/domain_info.json --dem ../terrain_norge/7705_2_10m_z33.tif \
-    ../wind_sim/case_senja_U12 ../wind_sim/case_senja_D225_U12 ...   # ~4 min for nine cases
-```
+WindINR does not forecast by itself. Trained on 65 of the CFD cases (checkpoint `senja_v1/v3`),
+it downscales each lead time of a coarse forecast to a high-resolution 3D field on the CFD box,
+so together with the forecast model it gives a high-resolution wind prediction. Its input is the
+forecast's mean wind between the ground and 500 m on a 7 × 7 (~1 km) grid. Below 25 m above
+ground the training data are too slow, so the wind there is taken at 25 m and extended with the
+log law.
 
-Case names give the flow direction as a math angle the flow goes *toward* (`D225` = toward
-the SW = from the NE); the 45° cases are named `case_senja_U<speed>` without a `D`.
+The native-resolution datasets put the driving forecast on the same grid and levels at its own
+resolution: one 0.25° point covers the whole box for FCN3 and GraphCast, two 0.1° points for Aurora.
 
-### WindINR × forecast (a unified, time-varying field)
-
-The CFD cases are idealised, one inflow direction each. `convert_windinr.py` turns a forecast
-into one high-resolution field per lead time with WindINR (`../windinr`, checkpoint
-`senja_v1/v3`, trained on 65 of these cases): the forecast's mean wind between the ground and
-500 m on a 7 × 7 (~1 km) grid over the CFD box is the background, and WindINR predicts the
-wind on the CFD box grid at 50, 150, 300 and 500 m above sea level (its height range ends at
-500 m) and 10 m above ground. Below 25 m above ground the training data are too slow (the
-extraction interpolated the wall's zero velocity), so the wind there is taken at 25 m and
-extrapolated with the log law. Datasets `windinr-aurora01`, `windinr-fcn3` and
-`windinr-graphcast025` (2024-01-31 06Z, T+0 to T+24 h) share the CFD box terrain.
-
-```bash
-PY=../wind_sim/.venv/bin/python
-$PY preprocessing/convert_windinr.py prep --driver aurora01      # background + query points
-jobs/run_windinr_inference.sh aurora01                           # LUMI PyTorch container, CPU, ~1 min
-$PY preprocessing/convert_windinr.py export --driver aurora01
-$PY preprocessing/convert_windinr.py native --driver aurora01      # the forecast itself on the CFD box
-```
-
-For comparison, `native` puts the driving forecast on the same CFD box grid and levels at its
-own resolution (each point takes its nearest model grid point: one 0.25° point covers the
-whole box for FCN3/GraphCast, two 0.1° points for Aurora). The menus group the datasets:
-forecasts over the Senja domain, the forecasts at native resolution on the CFD box, WindINR ×
-forecast, and the CFD cases (manifest `group`).
-
-## Running
-
-Python environments (Olivia):
-
-- GPU inference uses `/cluster/projects/nn8106k/siyan/envs/earth2studio`, which is aarch64 and only runs on `accel` nodes.
-- CPU preprocessing uses `/cluster/projects/nn8106k/siyan/envs/wind-vis-cpu` (see `requirements.txt`).
-
-```bash
-PY=/cluster/projects/nn8106k/siyan/envs/wind-vis-cpu/bin/python
-
-# 1. real terrain, then synthetic data (Phase 0; its vertical wind is computed on that terrain)
-$PY preprocessing/terrain.py                      # --n 500 for a finer mesh
-$PY preprocessing/make_synthetic.py
-
-# 2. FCN3 forecast (≈12 min, mostly the CDS download)
-sbatch jobs/run_fcn3_senja.slurm                  # or: sbatch jobs/run_fcn3_senja.slurm 2024-01-31T06:00:00 cds
-$PY preprocessing/convert_fcn3.py data/forecast/fcn3_20240131T06.nc
-
-# 2b. Aurora 0.1° (≈30 min download once, ≈3 min on one GH200)
-#     IFS HRES analysis at t-6 h and t from NCAR GDEX (d113001, formerly RDA), anonymous
-$PY model/aurora01_inference.py --fetch-only     # login node: GRIB + checkpoint + static fields
-pip install --no-deps --target /cluster/work/projects/nn8106k/siyan/pylib/aurora microsoft-aurora==2.0.1   # once
-sbatch jobs/run_aurora01_senja.slurm              # or: sbatch jobs/run_aurora01_senja.slurm 2024-01-31T06
-$PY preprocessing/convert_fcn3.py data/forecast/aurora01_20240131T06.nc --name Aurora --web-dir aurora01
-
-# 2c. GraphCast 0.25° (ERA5 from ARCO, anonymous; ≈1 min download, ≈2.5 min on one GH200)
-$PY model/graphcast_inference.py --fetch-only     # login node: ERA5 at t-6 h and t + weights
-sbatch jobs/run_graphcast_senja.slurm             # or: sbatch jobs/run_graphcast_senja.slurm 2024-01-31T06
-$PY preprocessing/convert_fcn3.py data/forecast/graphcast_20240131T06.nc --name GraphCast --web-dir graphcast025
-
-# 3. viewer
-module load NRIS/CPU; module load nodejs/20.13.1-GCCcore-13.3.0
-cd frontend && npm install && npm run dev         # http://127.0.0.1:5173 (VS Code forwards the port)
-npm run build                                     # static site in frontend/dist (data included)
-```
-
-`frontend/public/data` is a symlink to `data/web`. URL parameters select the data, e.g.
-`?data=fcn3&terrain=terrain`, or `?data=synthetic` for the synthetic test data (always shown on the Senja DTM,
-which its vertical wind is computed on).
-
-## Viewer
-
-- Orbit, zoom and pan the camera; **Reset camera** returns to the default view.
-- Particles are advected with bilinear interpolation in space and linear interpolation in time. They have finite lifetimes and respawn when they expire, leave the domain, or flow into terrain (level height below ground). Colour shows wind speed; see the legend.
-- **Selected levels** (Mode A) shows one or more chosen levels (tick several in the list), each with its own particles and a translucent surface coloured by speed. **All levels** (Mode B) shows all five levels stacked at their geopotential heights, without surfaces.
-- The timeline has play/pause, previous/next (←/→), space to toggle, drag, and a playback-speed control. **Smooth time interpolation** switches between V(t) = (1−α)V₀ + αV₁ and jumping directly between frames.
-- Click anywhere to inspect a point: lat/lon, terrain height, and u, v, speed and direction for the selected level, plus a vertical profile of all levels.
-- **Query point:** type `lat, lon` (e.g. `69.35, 17.60`; `lon lat` is swapped automatically) to inspect that point the same way. The point is marked with a pulsing ring and the camera pans to it.
-- Sliders set the particle count, visual flow speed and vertical exaggeration.
-
-Particle motion runs on a visual time scale (**Flow speed** = simulated seconds per real
-second) that is independent of the forecast clock. At real speed, a 10 m/s wind crosses the
-50 km domain in under 1.5 h.
-
-## Adding another model
+## Adding a model
 
 1. Write `model/<name>_inference.py` to produce a raw crop.
-2. Write `preprocessing/convert_<name>.py` that calls `common_schema.build_dataset(...)`, then `write_zarr` and `export_web(ds, data/web/<id>)`.
-3. The dataset appears in the viewer's **Forecast** menu. No frontend change is needed.
-
-GraphCast works the same way through earth2studio, using the
-`envs/earth2studio-graphcast` env and `earth2studio.models.px.GraphCastOperational`. It uses the
-same `u850`/`z850` variable naming, so `convert_fcn3.py` can be reused with `--name GraphCast --web-dir graphcast`.
+2. Convert it with `common_schema.build_dataset(...)`, then `write_zarr` and `export_web(ds, data/web/<id>)`. Models with earth2studio-style variable names (`u850`, `z850`, …) can reuse `convert_fcn3.py --name <Name> --web-dir <id>`.
+3. The dataset appears in the viewer's **Dataset** menu.
