@@ -2,10 +2,10 @@
  "schema": "senja-common-wind-v1",
  "model": "Synthetic",
  "init_time": "synthetic",
- "description": "u = 5 + 2 sin(x), v = 3 cos(y); stronger and veering with height; 10 m wind 0.7x and backed 15 deg",
+ "description": "u = 5 + 2 sin(x), v = 3 cos(y) on flat levels at 50, 150, 300, 500 m above sea level, stronger and veering with height; 10 m wind 0.7x and backed 15 deg. Vertical wind forced by the Senja DTM: w10 = V10\u00b7\u2207h, aloft V\u00b7\u2207h decaying with height above the ground (1 km). No wind inside the terrain",
  "shape": [
   5,
-  5,
+  4,
   64,
   64
  ],
@@ -17,10 +17,9 @@
   24
  ],
  "levels": [
-  1000,
-  925,
-  850,
-  700,
+  50,
+  150,
+  300,
   500
  ],
  "lat": [
@@ -159,26 +158,32 @@
   "u": {
    "file": "u.bin",
    "units": "m s-1",
-   "min": 2.3872015476226807,
-   "max": 18.814001083374023
+   "min": 0.0,
+   "max": 8.112259864807129
   },
   "v": {
    "file": "v.bin",
    "units": "m s-1",
-   "min": -3.1276681423187256,
-   "max": 15.633124351501465
+   "min": -3.222092628479004,
+   "max": 3.816105842590332
   },
   "height": {
    "file": "height.bin",
    "units": "m",
-   "min": 70.0,
-   "max": 5690.0
+   "min": 50.0,
+   "max": 500.0
   },
   "wind_speed": {
    "file": "wind_speed.bin",
    "units": "m s-1",
-   "min": 3.0,
-   "max": 19.038515090942383
+   "min": 0.0,
+   "max": 8.643486022949219
+  },
+  "w": {
+   "file": "w.bin",
+   "units": "m s-1",
+   "min": -2.5303666591644287,
+   "max": 2.741251230239868
   }
  },
  "surface": {
@@ -193,8 +198,15 @@
    "units": "m s-1",
    "min": -3.2965450286865234,
    "max": 1.4848116636276245
+  },
+  "w10": {
+   "file": "w10.bin",
+   "units": "m s-1",
+   "min": -1.7024656534194946,
+   "max": 1.9071992635726929
   }
  },
  "native_deg": 0.25,
- "terrain": "terrain-synthetic"
+ "terrain": "terrain",
+ "level_units": "m ASL"
 }

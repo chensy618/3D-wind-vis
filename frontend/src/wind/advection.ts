@@ -11,10 +11,14 @@ const GROUND_CLEARANCE = 30;
 const FLOOR_AGL = 10;
 
 /**
- * `ParticleSystem.level` value for the 10 m above-ground wind. Callers must only put it into a
- * `levels` array when the dataset has `u10`/`v10`, and datasets must stay below this many levels.
+ * `ParticleSystem.level` value for the 10 m wind (u10/v10), drawn at SURFACE_ASL_M. Callers must
+ * only put it into a `levels` array when the dataset has `u10`/`v10`, and datasets must stay below
+ * this many levels.
  */
 export const SURFACE_LEVEL = 255;
+
+/** Height (m ASL) of the 10 m layer: a flat level like the others, below the terrain on land. */
+export const SURFACE_ASL_M = 10;
 
 /**
  * Near the mountain tops (within NEAR_GROUND_M of the ground, where the ground is above
@@ -149,7 +153,7 @@ export class ParticleSystem {
     const lat = domain.lat(y);
     const lon = domain.lon(x);
     const ground = terrain.at(lat, lon);
-    if (this.level[i] === SURFACE_LEVEL) return ground + FLOOR_AGL;
+    if (this.level[i] === SURFACE_LEVEL) return SURFACE_ASL_M > ground ? SURFACE_ASL_M : NaN;
     const h = wind.sample(wind.height, tw, this.level[i], lat, lon);
     return h > ground + GROUND_CLEARANCE ? h : NaN;
   }
@@ -276,11 +280,14 @@ export class ParticleSystem {
       }
       const floor = terrain.at(domain.lat(ny), domain.lon(nx)) + FLOOR_AGL;
       const ceiling = ctx.wind.manifest.variables.height.max;
-      const h =
-        this.level[i] === SURFACE_LEVEL
-          ? floor // the 10 m layer follows the ground; w does not lift it off
-          : Math.min(Math.max(this.heightM[i] + uvw[2] * (ctx.wBoost ?? 1) * dt, floor), Math.max(ceiling, floor));
-      // the motion actually made (held at the floor: no sinking), vertical as drawn
+      const on10m = this.level[i] === SURFACE_LEVEL;
+      if (on10m && floor - FLOOR_AGL >= SURFACE_ASL_M) {
+        this.respawn(i, ctx); // the flat 10 m level ran into the terrain
+        continue;
+      }
+      const h = on10m
+        ? SURFACE_ASL_M // a flat level; w does not lift it off
+        : Math.min(Math.max(this.heightM[i] + uvw[2] * (ctx.wBoost ?? 1) * dt, floor), Math.max(ceiling, floor));
       // the motion actually made (held at the floor: no sinking), vertical as drawn unless
       // only horizontal motion counts (colour shows horizontal speed: the blue dots)
       const run = Math.hypot(nx - this.x[i], ny - this.y[i]);

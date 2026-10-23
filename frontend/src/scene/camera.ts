@@ -17,8 +17,11 @@ export interface CameraRig {
 
 const PAN_SECONDS = 0.8;
 
-/** Perspective camera with orbit (rotate), dolly (zoom) and pan. */
-export function createCamera(dom: HTMLElement, domain: Domain): CameraRig {
+/**
+ * Perspective camera with orbit (rotate), dolly (zoom) and pan. `distance` scales how far the
+ * default view stands back from the domain (1: the domain fills the view; larger shows it smaller).
+ */
+export function createCamera(dom: HTMLElement, domain: Domain, distance = 1): CameraRig {
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
   const controls = new OrbitControls(camera, dom);
   controls.enableDamping = true;
@@ -31,8 +34,8 @@ export function createCamera(dom: HTMLElement, domain: Domain): CameraRig {
   const reset = () => {
     // looking from the south-west over the ocean towards the Senja mountains
     // (target shifted west so the domain sits right of the control panel)
-    camera.position.set(-0.85 * size, 0.55 * size, 0.95 * size);
     controls.target.set(-0.1 * size, 0.06 * size, 0);
+    camera.position.set(-0.75 * size, 0.49 * size, 0.95 * size).multiplyScalar(distance).add(controls.target);
     controls.update();
   };
   const setDomain = (d: Domain) => {

@@ -44,7 +44,7 @@ export class PointQuery {
     const b = this.bounds;
     this.msg.classList.remove('error');
     this.msg.textContent = b
-      ? `Latitude, longitude inside ${b.latMin.toFixed(2)}–${b.latMax.toFixed(2)}° N, ${b.lonMin.toFixed(2)}–${b.lonMax.toFixed(2)}° E`
+      ? `Range ${b.latMin.toFixed(2)}–${b.latMax.toFixed(2)}° N, ${b.lonMin.toFixed(2)}–${b.lonMax.toFixed(2)}° E`
       : '';
   }
 

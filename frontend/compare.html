@@ -18,18 +18,20 @@
         </section>
       </div>
 
-      <nav class="panel view-switch" id="views" aria-label="Views"></nav>
+      <div id="ui">
+        <nav class="panel view-switch" id="views" aria-label="Views"></nav>
 
-      <header class="panel cmp-bar">
-        <label class="cmp-field">Model <select id="model" aria-label="Forecast model"></select></label>
-        <div class="seg cmp-levels" id="levels" role="group" aria-label="Levels"></div>
-        <label class="check"><input id="show-surface" type="checkbox" checked /> Level surface</label>
-        <button id="reset-camera">Reset camera</button>
-        <span class="cmp-where" id="where"></span>
-      </header>
+        <header class="panel cmp-bar">
+          <label class="cmp-field">Model <select id="model" aria-label="Forecast model"></select></label>
+          <div class="seg cmp-levels" id="levels" role="group" aria-label="Levels"></div>
+          <label class="check"><input id="show-surface" type="checkbox" checked /> Level surface</label>
+          <button id="reset-camera">Reset camera</button>
+          <span class="cmp-where" id="where"></span>
+        </header>
 
-      <div class="panel" id="legend"></div>
-      <footer class="panel" id="timeline"></footer>
+        <div class="panel" id="legend"></div>
+        <footer class="panel" id="timeline"></footer>
+      </div>
 
       <div id="loading" hidden><div class="spinner"></div><span>Loading…</span></div>
       <div id="error" role="alert" hidden></div>

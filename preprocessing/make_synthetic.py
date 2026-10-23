@@ -1,8 +1,13 @@
 """Phase 0: synthetic wind field + synthetic terrain in the common schema.
 
-    u = 5 + 2 sin(kx x + phase(t))      scaled with height
-    v = 3 cos(ky y + phase(t))
+    u = 5 + 2 sin(kx x + phase(t))      on flat levels 50, 150, 300, 500 m ASL (as WindINR and the
+    v = 3 cos(ky y + phase(t))          Forecast vs WindINR page), stronger (+27 %/km) and veering
+                                        (6 deg/km) with height
     10 m wind: the same field, weaker (x0.7) and backed 15 deg by surface friction
+    w10 = V10 . grad(h)                 air follows the Senja DTM (h smoothed to the wind grid)
+    w   = V . grad(h) exp(-(z - h) / H) the terrain forcing decays with height above the ground
+                                        (H = 1 km)
+    Inside the terrain (level at or below the ground) u = v = w = 0, as in the WindINR export.
 
 Usage:
     python preprocessing/make_synthetic.py
@@ -11,25 +16,48 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
+from scipy.interpolate import RegularGridInterpolator
+from scipy.ndimage import uniform_filter
 
 from common_schema import (
     LEAD_HOURS,
-    LEVELS_HPA,
     SENJA_BBOX,
     build_dataset,
     export_terrain_web,
     export_web,
     target_grid,
+    update_index,
     write_zarr,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Rough standard-atmosphere geopotential heights (m) for the five levels
-STD_HEIGHT = {1000: 110.0, 925: 760.0, 850: 1460.0, 700: 3010.0, 500: 5570.0}
+# Flat levels (m ASL), the same as convert_windinr.LEVELS_ASL
+LEVELS_ASL = [50, 150, 300, 500]
+M_PER_DEG_LAT = 111_320.0
+W_DECAY_M = 1000.0  # e-folding height of the terrain-forced vertical wind
+TERRAIN_ID = "terrain"  # the Senja DTM the vertical wind is computed on (data/web/terrain)
+
+
+def terrain_slope(lat: np.ndarray, lon: np.ndarray, terrain_dir: Path):
+    """Terrain elevation and slope (dh/dx east, dh/dy north) on the wind grid. The DTM is
+    block-averaged to about the wind spacing first, so the slope is the one the wind grid resolves.
+    Distances use one cos(latitude) at the domain centre, as the viewer does."""
+    tm = json.loads((terrain_dir / "manifest.json").read_text())
+    elev = np.fromfile(terrain_dir / tm["file"], "<f4").reshape(tm["shape"]).astype(np.float64)
+    tlat, tlon = np.asarray(tm["lat"]), np.asarray(tm["lon"])
+    block = max(1, round((lat[1] - lat[0]) / (tlat[1] - tlat[0])))
+    smooth = uniform_filter(elev, size=block, mode="nearest")
+    yy, xx = np.meshgrid(lat, lon, indexing="ij")
+    h = RegularGridInterpolator((tlat, tlon), smooth)(np.stack([yy, xx], axis=-1))
+    dy = M_PER_DEG_LAT * (lat[1] - lat[0])
+    dx = M_PER_DEG_LAT * np.cos(np.deg2rad(0.5 * (lat[0] + lat[-1]))) * (lon[1] - lon[0])
+    dhdy, dhdx = np.gradient(h, dy, dx)
+    return h, dhdx, dhdy
 
 
 def synthetic_terrain(ny: int, nx: int) -> np.ndarray:
@@ -55,43 +83,59 @@ def main() -> None:
     args = ap.parse_args()
 
     lat, lon = target_grid(args.ny, args.nx)
+    ground, dhdx, dhdy = terrain_slope(lat, lon, ROOT / "data/web" / TERRAIN_ID)
     yy, xx = np.meshgrid(np.linspace(0, 2 * np.pi, args.ny), np.linspace(0, 2 * np.pi, args.nx), indexing="ij")
 
-    nt, nl = len(LEAD_HOURS), len(LEVELS_HPA)
+    nt, nl = len(LEAD_HOURS), len(LEVELS_ASL)
     u = np.empty((nt, nl, args.ny, args.nx), np.float32)
     v = np.empty_like(u)
-    h = np.empty_like(u)
+    w = np.empty_like(u)
+    h = np.broadcast_to(np.array(LEVELS_ASL, np.float32)[None, :, None, None], u.shape)
     u10 = np.empty((nt, args.ny, args.nx), np.float32)
     v10 = np.empty_like(u10)
+    w10 = np.empty_like(u10)
     for it, lead in enumerate(LEAD_HOURS):
         phase = 2 * np.pi * lead / 24.0
-        for il, p in enumerate(LEVELS_HPA):
-            scale = 1.0 + 1.5 * (1000 - p) / 500.0  # stronger aloft
-            turn = np.deg2rad(8 * il)  # veering with height
-            u0 = 5 + 2 * np.sin(xx + phase)
-            v0 = 3 * np.cos(yy + phase)
-            u[it, il] = scale * (u0 * np.cos(turn) - v0 * np.sin(turn))
-            v[it, il] = scale * (u0 * np.sin(turn) + v0 * np.cos(turn))
-            h[it, il] = STD_HEIGHT[p] + 40 * np.sin(yy / 2 + phase) + 20 * il * np.cos(xx / 2)
+        u0 = 5 + 2 * np.sin(xx + phase)
+        v0 = 3 * np.cos(yy + phase)
+        for il, z in enumerate(LEVELS_ASL):
+            scale = 1.0 + 0.27 * z / 1000.0  # stronger aloft
+            turn = np.deg2rad(6.0 * z / 1000.0)  # veering with height
+            agl = z - ground
+            above = agl > 0
+            u[it, il] = np.where(above, scale * (u0 * np.cos(turn) - v0 * np.sin(turn)), 0.0)
+            v[it, il] = np.where(above, scale * (u0 * np.sin(turn) + v0 * np.cos(turn)), 0.0)
+            w[it, il] = np.where(above, (u[it, il] * dhdx + v[it, il] * dhdy) * np.exp(-agl / W_DECAY_M), 0.0)
         back = np.deg2rad(-15)
         u10[it] = 0.7 * (u0 * np.cos(back) - v0 * np.sin(back))
         v10[it] = 0.7 * (u0 * np.sin(back) + v0 * np.cos(back))
+        w10[it] = u10[it] * dhdx + v10[it] * dhdy
 
     ds = build_dataset(
-        u, v, height=h,
-        lead_hours=LEAD_HOURS, levels=LEVELS_HPA, lat=lat, lon=lon,
+        u, v, height=h, w=w,
+        lead_hours=LEAD_HOURS, levels=LEVELS_ASL, lat=lat, lon=lon,
         attrs={
             "model": "Synthetic",
             "init_time": "synthetic",
-            "native_deg": 0.25,  # a coarse, FCN3-like grid
-            "terrain": "terrain-synthetic",  # this field goes with the synthetic terrain, not the DTM
-            "description": "u = 5 + 2 sin(x), v = 3 cos(y); stronger and veering with height; "
-                           "10 m wind 0.7x and backed 15 deg",
+            "native_deg": 0.25,  # drawn as a coarse, FCN3-like grid
+            "description": "u = 5 + 2 sin(x), v = 3 cos(y) on flat levels at "
+                           f"{', '.join(map(str, LEVELS_ASL))} m above sea level, stronger and veering with height; "
+                           "10 m wind 0.7x and backed 15 deg. Vertical wind forced by the Senja DTM: "
+                           "w10 = V10·∇h, aloft V·∇h decaying with height above the ground (1 km). "
+                           "No wind inside the terrain",
         },
-        surface={"u10": u10, "v10": v10},
+        surface={"u10": u10, "v10": v10, "w10": w10},
     )
     write_zarr(ds, ROOT / "data/synthetic/wind.zarr")
-    print("wrote", export_web(ds, ROOT / "data/web/synthetic"))
+    web = ROOT / "data/web"
+    manifest = export_web(ds, web / "synthetic")
+    m = json.loads(manifest.read_text())
+    m["terrain"] = TERRAIN_ID  # w only matches this terrain, so the viewers load it with this dataset
+    m["level_units"] = "m ASL"
+    manifest.write_text(json.dumps(m, indent=1))
+    update_index(web)
+    print("wrote", manifest, f"|w10| max {np.abs(w10).max():.2f} m/s, |w| max {np.abs(w).max():.2f} m/s; inside terrain "
+          + ", ".join(f"{z} m {(z <= ground).mean():.0%}" for z in LEVELS_ASL))
 
     tlat, tlon = target_grid(args.terrain_n, args.terrain_n)
     elev = synthetic_terrain(args.terrain_n, args.terrain_n)

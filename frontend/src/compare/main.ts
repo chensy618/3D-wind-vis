@@ -14,8 +14,9 @@ import { ForecastArrows } from './forecastArrows';
 import { windFromLabel } from '../ui/inspector';
 import { renderLegend } from '../ui/legend';
 import { Timeline } from '../ui/timeline';
+import { fitUi } from '../ui/fit';
 import { renderViewSwitcher } from '../ui/viewSwitcher';
-import { AdvectionContext, ParticleSystem, SURFACE_LEVEL } from '../wind/advection';
+import { AdvectionContext, ParticleSystem, SURFACE_ASL_M, SURFACE_LEVEL } from '../wind/advection';
 import { timeWeights, TimeWeights } from '../wind/interpolation';
 import { loadIndex, loadTerrain, loadWind, loadWindManifest, Terrain, WindField } from '../wind/loader';
 
@@ -46,15 +47,13 @@ const STILL_FADE = { stillTime: 0.05, fadeOut: 0.25, horizontal: true };
 /** Trail length in frames here (the main viewer keeps the default 35). */
 const TRAIL_LEN = 45;
 
-/** Vertical exaggeration is fixed (no slider). */
-const EXAGGERATION = 1;
-
 const state = {
   t: 0,
   playing: false,
   rate: 1, // forecast hours per second
   showSurface: true,
   speedFactor: 300,
+  exaggeration: 4, // vertical stretch, from the domain size (Domain.viewDefaults)
   levels: [] as number[], // shown level indices, ascending; all of them by default
   surfaceLayer: false, // the 10 m layer is on show; only when both datasets have u10/v10
 };
@@ -182,16 +181,16 @@ class Pane {
     if (!this.wind || !this.content || !this.terrainMesh || !this.annotations) return;
     const w = this.wind;
     if (this.grid === 'native' && w.manifest.native_deg) {
-      this.gridOverlay.build(w.manifest.native_deg, w.manifest.model.replace(/\s*\(native\)$/, ''), terrain, domain, EXAGGERATION, 2);
+      this.gridOverlay.build(w.manifest.native_deg, w.manifest.model.replace(/\s*\(native\)$/, ''), terrain, domain, state.exaggeration, 2);
     } else if (this.grid === 'cfd' && w.manifest.training) {
-      this.gridOverlay.buildRegular(w.manifest.training.cfd_m / 1000, terrain, domain, EXAGGERATION);
+      this.gridOverlay.buildRegular(w.manifest.training.cfd_m / 1000, terrain, domain, state.exaggeration);
     }
-    this.terrainMesh.scale.y = EXAGGERATION;
+    this.terrainMesh.scale.y = state.exaggeration;
     const top = w.manifest.variables.height.max + 500;
     this.content.getObjectByName('domain-frame')?.removeFromParent();
-    this.content.add(buildDomainFrame(domain, (top / 1000) * EXAGGERATION));
+    this.content.add(buildDomainFrame(domain, (top / 1000) * state.exaggeration));
     const heights = w.levels.map((_, i) => w.meanHeight(i, 0));
-    this.annotations.build(w.levels, heights, EXAGGERATION, top, w.manifest.level_units);
+    this.annotations.build(w.levels, heights, state.exaggeration, top, w.manifest.level_units);
     this.highlightLevels(state.levels);
   }
 
@@ -208,7 +207,7 @@ class Pane {
       domain,
       tw,
       speedFactor: state.speedFactor,
-      exaggeration: EXAGGERATION,
+      exaggeration: state.exaggeration,
       vertical: true, // WindINR moves with its w; the raw forecast has none
       wBoost: W_BOOST,
     };
@@ -254,17 +253,17 @@ class Pane {
   updateSurfaces(terrain: Terrain, tw: TimeWeights, maxSpeed: number): void {
     if (this.arrows && this.wind && shared) {
       const shown = this.wind.levels.map((_, i) => i).filter(isShown);
-      this.arrows.update(this.wind, shared.domain, tw, shown, EXAGGERATION, maxSpeed);
+      this.arrows.update(this.wind, shared.domain, tw, shown, state.exaggeration, maxSpeed);
     }
     this.surfaces.forEach((s, i) => {
       const show = state.showSurface && isShown(i);
       s.mesh.visible = show;
-      if (show) s.update(i, tw, terrain, EXAGGERATION, maxSpeed, state.levels.length === 1 ? 1 : 0.18);
+      if (show) s.update(i, tw, terrain, state.exaggeration, maxSpeed, state.levels.length === 1 ? 1 : 0.18);
     });
     if (this.surfaceMesh) {
       const show = state.showSurface && state.surfaceLayer;
       this.surfaceMesh.mesh.visible = show;
-      if (show) this.surfaceMesh.update(this.wind!, tw, terrain, EXAGGERATION, maxSpeed, state.surfaceLayer && state.levels.length === 0 ? 1 : 0.18);
+      if (show) this.surfaceMesh.update(this.wind!, tw, terrain, state.exaggeration, maxSpeed, state.surfaceLayer && state.levels.length === 0 ? 1 : 0.18);
     }
   }
 
@@ -313,6 +312,7 @@ const paneInr = new Pane($('#pane-inr'), N_PARTICLES, undefined, 'cfd');
 const panes = [paneRaw, paneInr];
 
 renderViewSwitcher($('#views'), 'compare');
+fitUi();
 
 function syncLevelTags(): void {
   for (const p of panes) p.highlightLevels(state.levels);
@@ -387,7 +387,7 @@ const levelsEl = $('#levels');
 function renderLevels(levels: number[], unit: string, has10m: boolean): void {
   levelsEl.innerHTML =
     levels.map((lv, i) => `<button type="button" data-i="${i}" class="on" aria-pressed="true">${lv} ${unit.split(' ')[0]}</button>`).join('') +
-    '<button type="button" data-10m="1"' + (has10m ? '>10 m AGL' : ' disabled>10 m AGL') + '</button>' +
+    '<button type="button" data-10m="1"' + (has10m ? '>10 m ASL' : ' disabled>10 m ASL') + '</button>' +
     '<button type="button" data-all="1">All levels</button>';
 }
 
@@ -464,6 +464,7 @@ async function load(driver: string): Promise<void> {
       const terrain = await loadTerrain(terrainId);
       shared = { terrain, terrainId, domain: Domain.fromGrid(terrain.grid), maxSpeed: 0 };
       state.speedFactor = shared.domain.viewDefaults.flowSpeed;
+      state.exaggeration = shared.domain.viewDefaults.exaggeration;
     }
     $('#where').innerHTML = whereText(shared.domain);
     // one colour scale for both, so equal colours mean equal speeds
@@ -543,7 +544,9 @@ function popupHtml(wind: WindField, tw: TimeWeights, lat: number, lon: number, g
   const ten =
     state.surfaceLayer && wind.u10 && wind.v10
       ? [
-          `<span class="k">10 m AGL</span> · <b>${Math.hypot(wind.sampleSurface(wind.u10, tw, lat, lon), wind.sampleSurface(wind.v10, tw, lat, lon)).toFixed(1)} m/s</b>${wind.w10 ? ` · <span class="k">w</span> ${signed(wind.sampleSurface(wind.w10, tw, lat, lon))}` : ''}`,
+          ground >= SURFACE_ASL_M
+            ? `<span class="k">10 m ASL</span> · below terrain`
+            : `<span class="k">10 m ASL</span> · <b>${Math.hypot(wind.sampleSurface(wind.u10, tw, lat, lon), wind.sampleSurface(wind.v10, tw, lat, lon)).toFixed(1)} m/s</b>${wind.w10 ? ` · <span class="k">w</span> ${signed(wind.sampleSurface(wind.w10, tw, lat, lon))}` : ''}`,
         ]
       : [];
   return [...levelLines, ...ten].join('<br>') || `<span class="k">shown layers</span> · below terrain`;
@@ -561,15 +564,15 @@ function updateProbe(): void {
   const lat = domain.lat(probe.y);
   const lon = domain.lon(probe.x);
   const ground = terrain.at(lat, lon);
-  const ex = EXAGGERATION;
+  const ex = state.exaggeration;
   const X = domain.sceneX(probe.x);
   const Z = domain.sceneZ(probe.y);
   const gy = (ground / 1000) * ex;
   const heights = inr.levels.map((_, k) => inr.sample(inr.height, tw, k, lat, lon));
   const ys = heights.filter((h) => h > ground).map((h) => (h / 1000) * ex);
-  // popup at the highest shown layer (the 10 m layer alone means the ground), or on the ground where the terrain is higher
+  // popup at the highest shown layer, or on the ground where the terrain is higher
   const shownLevels = heights.map((h, k) => ({ h, k })).filter((x) => isShown(x.k));
-  const popH = Math.max(...(shownLevels.length ? shownLevels.map((x) => x.h) : []), state.surfaceLayer ? ground + 10 : -Infinity);
+  const popH = Math.max(...(shownLevels.length ? shownLevels.map((x) => x.h) : []), state.surfaceLayer ? SURFACE_ASL_M : -Infinity);
   const popY = (Math.max(popH, ground) / 1000) * ex;
   for (const p of panes) {
     p.marker.set(X, Z, gy, ys, 0.5 * domain.scale);

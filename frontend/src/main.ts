@@ -14,6 +14,7 @@ import { renderLegend } from './ui/legend';
 import { renderLevelPicker } from './ui/levels';
 import { PointQuery } from './ui/query';
 import { Timeline } from './ui/timeline';
+import { fitUi } from './ui/fit';
 import { renderViewSwitcher } from './ui/viewSwitcher';
 import { AdvectionContext, ParticleSystem, SURFACE_LEVEL } from './wind/advection';
 import { timeWeights, TimeWeights } from './wind/interpolation';
@@ -22,8 +23,8 @@ import { DataIndex, datasetOptions, loadIndex, loadTerrain, loadWind, Terrain, W
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
 // ---------------------------------------------------------------- state
-/** Vertical exaggeration is fixed (no slider). */
-const EXAGGERATION = 1;
+/** The default view stands this much further back than the camera's own framing (a little smaller). */
+const VIEW_DISTANCE = 1.12;
 
 const state = {
   t: 0,
@@ -32,10 +33,10 @@ const state = {
   smooth: true, // temporal interpolation between forecast steps
   nParticles: 4000,
   speedFactor: 300, // simulated seconds per real second for particle motion
+  exaggeration: 4, // vertical stretch, from the domain size (Domain.viewDefaults)
   showSurface: true,
-  vertical: true, // move particles with w when the dataset has it
   levels: [] as number[], // shown level indices, ascending; all of them by default
-  surfaceLayer: true, // the dataset's 10 m wind is on show (only when it has u10/v10)
+  surfaceLayer: false, // the dataset's 10 m wind is on show (only when it has u10/v10)
 };
 
 interface Loaded {
@@ -48,7 +49,7 @@ interface Loaded {
   terrainMesh: THREE.Mesh;
   /** one level surface per pressure level, shown for the chosen levels */
   surfaces: LevelSurface[];
-  /** the draped 10 m surface, when the dataset has u10/v10 */
+  /** the flat 10 m surface, when the dataset has u10/v10 */
   surfaceMesh: SurfaceLayer | null;
   annotations: Annotations;
 }
@@ -103,13 +104,10 @@ const query = new PointQuery($('#query'), (lat, lon) => {
 });
 
 renderViewSwitcher($('#views'), 'viewer');
+fitUi();
 $<HTMLInputElement>('#show-surface').addEventListener('change', (e) => {
   state.showSurface = (e.target as HTMLInputElement).checked;
   surfaceDirty = true;
-});
-$<HTMLInputElement>('#vertical').addEventListener('change', (e) => {
-  state.vertical = (e.target as HTMLInputElement).checked;
-  resetParticles();
 });
 $<HTMLInputElement>('#smooth').addEventListener('change', (e) => {
   state.smooth = (e.target as HTMLInputElement).checked;
@@ -126,9 +124,10 @@ const onDataChange = () => {
 };
 datasetSel.addEventListener('change', onDataChange);
 
-/** Flow speed suited to the domain size (Domain.viewDefaults). */
+/** Flow speed and vertical exaggeration suited to the domain size (Domain.viewDefaults). */
 function applyViewDefaults(domain: Domain): void {
   state.speedFactor = domain.viewDefaults.flowSpeed;
+  state.exaggeration = domain.viewDefaults.exaggeration;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -144,8 +143,8 @@ function advCtx(): AdvectionContext {
     domain: d.domain,
     tw: currentTw(),
     speedFactor: state.speedFactor,
-    exaggeration: EXAGGERATION,
-    vertical: state.vertical,
+    exaggeration: state.exaggeration,
+    vertical: true, // particles move with w whenever the dataset has it (WindINR, CFD)
   };
 }
 
@@ -171,18 +170,46 @@ function setTime(t: number): void {
   surfaceDirty = true;
 }
 
+/** Full name and maker per model, for the one-line description under the title. */
+const MODEL_SOURCES: Record<string, string> = {
+  FCN3: 'FourCastNet3, NVIDIA',
+  GraphCast: 'GraphCast, Google DeepMind',
+  Aurora: 'Aurora, Microsoft',
+  Synthetic: 'Analytic test field',
+};
+
+/**
+ * One line under the title (the model name is already beside it): the forecast model's full name
+ * and maker; for WindINR its CFD training and the forecast it downscales; for a CFD case its inflow; otherwise the
+ * description's first clause.
+ */
+function shortDescription(m: WindField['manifest']): string {
+  const [name, driver] = m.model.split(' × ');
+  const known = MODEL_SOURCES[name.split(' ')[0]];
+  if (known) return known;
+  // WindINR does not forecast: trained on CFD runs, it then downscales the coarse forecast per lead time
+  if (driver) {
+    const by = MODEL_SOURCES[driver]?.split(', ')[0] ?? driver;
+    const trained = m.description.match(/trained on ([^)]+)\)/)?.[1] ?? 'CFD simulations';
+    return `Trained on ${trained}, then downscales the ${by} forecast to high resolution over the Senja CFD domain`;
+  }
+  const inflow = m.description.match(/inflow from \S+ \((\w+)\) at ([\d.]+ m\/s)/);
+  if (inflow) return `Steady RANS, inflow from ${inflow[1]} at ${inflow[2]}`;
+  return m.description.match(/^(.*?)(?:[:;]\s|\.\s|$)/)![1];
+}
+
 function meanHeights(w: WindField): number[] {
   return w.levels.map((_, i) => w.meanHeight(i, 0));
 }
 
 function rebuildView(): void {
   if (!data) return;
-  data.terrainMesh.scale.y = EXAGGERATION;
+  data.terrainMesh.scale.y = state.exaggeration;
   const w = data.wind;
   const top = w.manifest.variables.height.max + 500;
   data.content.getObjectByName('domain-frame')?.removeFromParent();
-  data.content.add(buildDomainFrame(data.domain, (top / 1000) * EXAGGERATION));
-  data.annotations.build(w.levels, meanHeights(w), EXAGGERATION, top, w.manifest.level_units);
+  data.content.add(buildDomainFrame(data.domain, (top / 1000) * state.exaggeration));
+  data.annotations.build(w.levels, meanHeights(w), state.exaggeration, top, w.manifest.level_units);
   resetParticles();
   surfaceDirty = true;
   lastProbeT = -1;
@@ -249,7 +276,7 @@ async function load(datasetId: string): Promise<void> {
     };
 
     if (!rig) {
-      rig = createCamera(canvas, domain);
+      rig = createCamera(canvas, domain, VIEW_DISTANCE);
       resize();
     } else if (newDomain) {
       rig.setDomain(domain);
@@ -257,17 +284,17 @@ async function load(datasetId: string): Promise<void> {
 
     const m = wind.manifest;
     $('#model-name').textContent = m.model;
-    $('#model-desc').textContent = m.description;
+    const desc = $('#model-desc');
+    desc.textContent = shortDescription(m);
+    desc.title = m.description; // the full text on hover when shortened
     $('#init-time').textContent = /^\d{4}-/.test(m.init_time) ? `init ${m.init_time.replace('T', ' ')}:00 UTC` : '';
-    $('#terrain-src').textContent = terrain.manifest.source;
-    const vert = $<HTMLInputElement>('#vertical');
-    vert.disabled = !wind.w;
-    vert.parentElement!.title = wind.w ? '' : 'This dataset has no vertical wind';
+    // without the file name or the ", resampled" note
+    $('#terrain-src').textContent = terrain.manifest.source.replace(/\s*\([^)]*\.tif\)/i, '').replace(/,\s*resampled$/i, '');
     renderLegend($('#legend'), data.maxSpeed);
 
     const has10m = !!(wind.u10 && wind.v10);
     state.levels = m.levels.map((_, i) => i);
-    state.surfaceLayer = false; // the 10 m layer starts off; tick it to add the surface wind
+    state.surfaceLayer = has10m; // every layer starts on, the 10 m one too when the dataset has it
     renderLevelPicker(
       $('#levels'),
       m.levels,
@@ -366,7 +393,7 @@ function updateProbe(): void {
     surface: wind.u10 && wind.v10 ? surfaceRow(wind, tw, lat, lon, ground) : null,
     maxSpeed: data.maxSpeed,
   });
-  const ex = EXAGGERATION;
+  const ex = state.exaggeration;
   const X = domain.sceneX(probe.x);
   const Z = domain.sceneZ(probe.y);
   const groundY = (ground / 1000) * ex;
@@ -405,18 +432,20 @@ function frame(): void {
     ps.step(dt, ctx);
     particles.update(ps, data.maxSpeed);
 
-    // one translucent surface per layer on show; fainter when several are stacked
-    const opacity = state.levels.length + (state.surfaceLayer ? 1 : 0) > 1 ? 0.25 : 0.35;
+    // one translucent surface per layer on show; seen through all n of them, the stack is as
+    // opaque as one surface at 0.35 (1 - (1 - a)^n = 0.35), so a side view stays see-through
+    const nLayers = state.levels.length + (state.surfaceLayer ? 1 : 0);
+    const opacity = 1 - Math.pow(1 - 0.35, 1 / Math.max(1, nLayers));
     data.surfaces.forEach((s, i) => {
       const show = state.showSurface && state.levels.includes(i);
       s.mesh.visible = show;
-      if (show && surfaceDirty) s.update(i, ctx.tw, data!.terrain, EXAGGERATION, data!.maxSpeed, opacity);
+      if (show && surfaceDirty) s.update(i, ctx.tw, data!.terrain, state.exaggeration, data!.maxSpeed, opacity);
     });
     const sl = data.surfaceMesh;
     if (sl) {
       const show = state.showSurface && state.surfaceLayer;
       sl.mesh.visible = show;
-      if (show && surfaceDirty) sl.update(data.wind, ctx.tw, data!.terrain, EXAGGERATION, data!.maxSpeed, opacity);
+      if (show && surfaceDirty) sl.update(data.wind, ctx.tw, data!.terrain, state.exaggeration, data!.maxSpeed, opacity);
     }
     surfaceDirty = false;
     if (probe && Math.abs(state.t - lastProbeT) > 0.05) {

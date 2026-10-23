@@ -109,7 +109,7 @@
    "id": "synthetic",
    "label": "Synthetic",
    "group": "Test",
-   "terrain": "terrain-synthetic"
+   "terrain": "terrain"
   }
  ],
  "terrains": [

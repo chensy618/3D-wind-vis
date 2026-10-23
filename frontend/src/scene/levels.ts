@@ -3,7 +3,7 @@ import { colormapLinear } from '../colormap';
 import { Domain } from '../geo';
 import { TimeWeights } from '../wind/interpolation';
 import { Terrain, WindField } from '../wind/loader';
-import { AGL_M } from './gridOverlay';
+import { SURFACE_ASL_M } from '../wind/advection';
 
 /**
  * Translucent surface following the geopotential height of one pressure
@@ -76,7 +76,10 @@ export class LevelSurface {
   }
 }
 
-/** Translucent surface draped AGL_M above the terrain, coloured by the dataset's own 10 m wind speed. */
+/**
+ * Translucent flat surface at SURFACE_ASL_M, coloured by the dataset's own 10 m wind speed, like the
+ * other levels. Parts below the terrain are hidden.
+ */
 export class SurfaceLayer {
   readonly mesh: THREE.Mesh;
 
@@ -128,12 +131,12 @@ export class SurfaceLayer {
         const k = j * nx + i;
         const u = wind.sampleSurface(wind.u10!, tw, lat[j], lon[i]);
         const v = wind.sampleSurface(wind.v10!, tw, lat[j], lon[i]);
-        p[k * 3 + 1] = ((elevation[k] + AGL_M) / 1000) * exaggeration;
+        p[k * 3 + 1] = (SURFACE_ASL_M / 1000) * exaggeration;
         colormapLinear(Math.hypot(u, v) / maxSpeed, rgb);
         c[k * 4] = rgb[0];
         c[k * 4 + 1] = rgb[1];
         c[k * 4 + 2] = rgb[2];
-        c[k * 4 + 3] = opacity;
+        c[k * 4 + 3] = SURFACE_ASL_M > elevation[k] ? opacity : 0;
       }
     }
     pos.needsUpdate = true;
