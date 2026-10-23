@@ -164,29 +164,6 @@ button.wide { width: 100%; }
   background: var(--panel); border: 1px solid var(--border); color: var(--muted); padding: 8px 12px; border-radius: 8px; max-width: 480px; text-align: center;
 }
 
-/* ---------------------------------------------------------------- surface wind page */
-.surface-page #controls { top: 92px; max-height: calc(100% - 108px); }
-.surface-page #legend { bottom: 16px; }
-.surface-page #controls [hidden] { display: none; }
-#more { margin: 4px 0 10px; }
-#more summary { cursor: pointer; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 8px; }
-#more[open] summary { color: var(--text); }
-.time-row { display: grid; grid-template-columns: 34px 1fr; gap: 8px; align-items: center; }
-.time-row button { height: 30px; padding: 0; }
-.time-row .range { margin-bottom: 0; }
-#data-opts [hidden] { display: none; }
-.surface-page #legend[hidden], #probe[hidden] { display: none; }
-.surface-page input:disabled + *, .surface-page button:disabled { opacity: 0.45; cursor: default; }
-#probe { top: 16px; right: 16px; width: 260px; }
-#probe .kind { margin-top: 6px; font-weight: 600; color: var(--accent); }
-
-@media (max-width: 760px) {
-  .surface-page #controls { bottom: 16px; max-height: 45%; }
-  #probe { left: 16px; width: auto; top: 90px; max-height: 30%; }
-}
-#overlay-seg button { white-space: nowrap; padding-left: 4px; padding-right: 4px; }
-#overlay-seg button[data-ov="w"] { flex: 1.7; }
-
 /* ---------------------------------------------------------------- point query */
 .query { display: flex; gap: 6px; }
 .query input {

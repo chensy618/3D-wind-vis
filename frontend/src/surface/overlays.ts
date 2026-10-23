@@ -3,12 +3,11 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { colormapLinear } from '../colormap';
 import { Domain } from '../geo';
 import { Terrain } from '../wind/loader';
 import { SurfaceWindModel } from './model';
 
-/** Height above ground (m) of the 10 m wind; particles, arrows and grids are drawn there. */
+/** Height above ground (m) the grid overlay is drawn at. */
 export const AGL_M = 10;
 /** native: the wind model's own lat/lon grid. terrain: the terrain grid. */
 export type GridKind = 'native' | 'terrain';
@@ -149,80 +148,5 @@ export class GridOverlay {
     this.group.add(
       new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.35, depthWrite: false })),
     );
-  }
-}
-
-/** One wind arrow at (x, y) km. */
-export interface ArrowPoint {
-  x: number;
-  y: number;
-  u: number;
-  v: number;
-}
-
-/** 10 m wind arrows draped 10 m above the ground; the fastest is about `spacing` km long. */
-export class ArrowField {
-  readonly group = new THREE.Group();
-
-  build(points: ArrowPoint[], spacing: number, terrain: Terrain, domain: Domain, exaggeration: number, maxSpeed: number, white: boolean): void {
-    disposeGroup(this.group);
-    const pos: number[] = [];
-    const col: number[] = [];
-    const rgb = [0, 0, 0];
-    const kmPerMs = (spacing * 0.95) / maxSpeed;
-    const push = (x: number, y: number) =>
-      pos.push(domain.sceneX(x), drapeY(terrain, domain, x, y, exaggeration), domain.sceneZ(y));
-    for (const { x: x0, y: y0, u, v } of points) {
-      const s = Math.hypot(u, v);
-      if (s < 0.05) continue;
-      const x1 = x0 + u * kmPerMs;
-      const y1 = y0 + v * kmPerMs;
-      const hl = Math.min(0.35 * s * kmPerMs, 0.35 * spacing); // arrowhead length, km
-      const ux = u / s;
-      const uy = v / s;
-      const c = Math.cos(0.45);
-      const sn = Math.sin(0.45);
-      push(x0, y0);
-      push(x1, y1);
-      push(x1, y1);
-      push(x1 - hl * (ux * c - uy * sn), y1 - hl * (uy * c + ux * sn));
-      push(x1, y1);
-      push(x1 - hl * (ux * c + uy * sn), y1 - hl * (uy * c - ux * sn));
-      if (white) rgb[0] = rgb[1] = rgb[2] = 1;
-      else colormapLinear(s / maxSpeed, rgb);
-      for (let q = 0; q < 6; q++) col.push(rgb[0], rgb[1], rgb[2]);
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    this.group.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true })));
-  }
-}
-
-/** Marks the inspected point: a stick from the ground to 10 m (exaggerated with the terrain) and a label. */
-export class TenMetreMarker {
-  readonly group = new THREE.Group();
-
-  set(terrain: Terrain, domain: Domain, x: number, y: number, exaggeration: number): void {
-    disposeGroup(this.group);
-    const stick = 0.6 * domain.scale; // stick above the 10 m point, shorter in a small domain
-    const X = domain.sceneX(x);
-    const Z = domain.sceneZ(y);
-    const ground = (terrain.at(domain.lat(y), domain.lon(x)) / 1000) * exaggeration;
-    const top = drapeY(terrain, domain, x, y, exaggeration);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute([X, ground, Z, X, top + stick, Z], 3));
-    this.group.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xffffff })));
-    const dot = new THREE.BufferGeometry();
-    dot.setAttribute('position', new THREE.Float32BufferAttribute([X, top, Z], 3));
-    this.group.add(new THREE.Points(dot, new THREE.PointsMaterial({ color: 0xffffff, size: 8, sizeAttenuation: false })));
-    const l = label(`● 10 m above ground · ${Math.round(terrain.at(domain.lat(y), domain.lon(x)) + AGL_M)} m a.s.l.`, 'ten');
-    l.position.set(X, top + stick, Z);
-    l.center.set(0, 1);
-    this.group.add(l);
-  }
-
-  hide(): void {
-    disposeGroup(this.group);
   }
 }

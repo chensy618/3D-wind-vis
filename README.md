@@ -40,7 +40,7 @@ Included in `data/web/` (about 17 MB, everything the viewer loads):
 - Aurora 0.1° forecast for the same case and the same fields (65 model grid points over Senja, against 12 for FCN3)
 - GraphCast 0.25° forecast for the same case and the same fields (12 grid points; same ERA5 initial state as FCN3)
 - Senja terrain: Kartverket DTM resampled to 256 × 256
-- Synthetic wind field (with a 10 m wind) and synthetic terrain, for testing the frontend
+- Synthetic wind field on the WindINR levels (50, 150, 300, 500 m ASL), with a 10 m wind and a vertical wind forced by the Senja DTM, and synthetic terrain, for testing the frontend
 - OpenFOAM CFD over a 6 × 6 km box around Segla/Ersfjord (nine steady cases: from SW at 8, 12 and 16 m/s, and from W, NW, N, NE, E and S at 12 m/s),
   on seven flat levels from 50 to 1500 m above sea level plus the 10 m wind, with its own 10 m DEM terrain (see [CFD datasets](#cfd-datasets))
 
@@ -128,9 +128,8 @@ project, on a ~197 k-cell terrain-following mesh over a 6 × 6 km box at Segla/E
 triangulation in x, y and height above ground) to 96 × 96 points on flat levels at 50, 150,
 300, 500, 700, 1000 and 1500 m above sea level. The mountains (up to ~800 m) cut through the
 lower levels: the wind is 0 inside the terrain, and the viewer hides those parts of a level
-and lets no particles in. It also samples 10 m above ground as `u10`/`v10`/`w10` for the surface
-page, where terrain adjustment is switched off for CFD, since the CFD already resolves the
-terrain. Below the first cell centre (17 m over the sea) the wind is extrapolated with the
+and lets no particles in. It also samples 10 m above ground as `u10`/`v10`/`w10` for the point
+probe. Below the first cell centre (17 m over the sea) the wind is extrapolated with the
 log law (z0 of the case). u/v are rotated from UTM grid north to true north (~2° here), w (positive up) is kept as is, and
 250 m is trimmed off each side of the box, where terrain meets the inflow/outflow boundaries.
 
@@ -183,9 +182,9 @@ Python environments (Olivia):
 ```bash
 PY=/cluster/projects/nn8106k/siyan/envs/wind-vis-cpu/bin/python
 
-# 1. synthetic data (Phase 0) and real terrain
-$PY preprocessing/make_synthetic.py
+# 1. real terrain, then synthetic data (Phase 0; its vertical wind is computed on that terrain)
 $PY preprocessing/terrain.py                      # --n 500 for a finer mesh
+$PY preprocessing/make_synthetic.py
 
 # 2. FCN3 forecast (≈12 min, mostly the CDS download)
 sbatch jobs/run_fcn3_senja.slurm                  # or: sbatch jobs/run_fcn3_senja.slurm 2024-01-31T06:00:00 cds
@@ -210,7 +209,8 @@ npm run build                                     # static site in frontend/dist
 ```
 
 `frontend/public/data` is a symlink to `data/web`. URL parameters select the data, e.g.
-`?data=fcn3&terrain=terrain`, or `?data=synthetic&terrain=terrain-synthetic` for the synthetic test data.
+`?data=fcn3&terrain=terrain`, or `?data=synthetic` for the synthetic test data (always shown on the Senja DTM,
+which its vertical wind is computed on).
 
 ## Viewer
 
@@ -225,35 +225,6 @@ npm run build                                     # static site in frontend/dist
 Particle motion runs on a visual time scale (**Flow speed** = simulated seconds per real
 second) that is independent of the forecast clock. At real speed, a 10 m/s wind crosses the
 50 km domain in under 1.5 h.
-
-## Surface wind page (`surface.html`)
-
-Linked from the viewer header. It shows how the Senja terrain changes the 10 m wind: where
-the flow is steered, sped up, sheltered, lifted and sunk. Global models resolve Senja with only a
-few grid points, so the page adds the terrain response in the browser, from a background wind and
-the DTM.
-
-The page is driven by a model's 10 m wind. Tuning parameters are folded under **More settings**.
-
-- **10 m wind:**
-  - **Model:** every dataset with a 10 m wind field. Today that is FCN3, GraphCast and Aurora, plus the synthetic field (on a 0.25° grid) for testing; a finer model added later appears here with its own grid. The grid spacing comes from `native_deg` in the manifest.
-  - **Time:** a slider from T+0 to T+24 h, with playback.
-  - **Terrain adjustment:** off shows the model as it is, one wind per model grid cell, with vertical wind from each cell's mean slope. On, the model wind is interpolated to the 200 m terrain grid and goes through the terrain response below. Both share the colour scales of the adjusted field, so the raw model's weak vertical wind is not stretched to look strong.
-- **Show:**
-  - **Colour:** the terrain by elevation only (default), by 10 m speed, or by vertical wind (red rising, blue sinking).
-  - **Grid:** chooses the model grid (~12 cells over the domain for FCN3) or the 200 m terrain grid (65 536 cells), and the line below it gives the count. The particles follow this choice: one particle per cell, which always respawns inside its cell and draws a fading streamline as it moves with the wind interpolated between grid points. Arrows (More settings) use the same grid. **Grid lines** draws the grid.
-- **Point:** click the terrain, or type `lat, lon` under **Query point**, for the 10 m wind, how far the terrain turned it, and the vertical wind. The point gets a pulsing ring and a 10 m marker; a query also pans the camera to it.
-
-Particles, arrows and grids are drawn 10 m above the ground. Particles follow the 200 m terrain at both resolutions so that they stay visible.
-
-How the terrain response is computed:
-
-- **Layer flow (steering and speed-up):** air in a layer between the ground and a stable lid conserves mass, ∇·((top − h) V) = 0, and stays irrotational. The flow speeds up across crests and is partly pushed around the mountains. The lid is 800 m above the highest summit (`layerDepth` in `frontend/src/surface/main.ts`); a shallower lid means more stable air and more blocking. The equation is linear in the background wind, so it is solved once for east and once for north, and each cell mixes the two with its local FCN3 wind. It runs on the terrain grid itself (256 × 256, ~200 m), so the wind and the terrain have the same resolution. Red-black SOR stops at a relative residual of 1e-4: about 1000 sweeps, 0.4 s on load, and ~25 ms per time step.
-- **Lee sheltering:** speed is reduced by the steepest upwind terrain angle within 3 km (Winstral Sx), by up to 60 % (`shelter`).
-- **Vertical wind:** air at the ground follows the terrain, so w = V·∇h. It is positive on windward slopes and negative on lee slopes. At terrain resolution the particles stay 10 m above the ground, so their climbing and sinking is exactly this w.
-
-This is a teaching and exploration tool, not a forecast. It has no lee waves, downslope
-windstorms, flow separation or thermal (katabatic) winds.
 
 ## Adding another model
 
